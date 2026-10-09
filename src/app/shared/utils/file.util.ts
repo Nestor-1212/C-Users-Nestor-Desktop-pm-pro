@@ -17,4 +17,6 @@ export function formatFileSize(bytes: number): string {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-export const MAX_ATTACHMENT_SIZE = 2 * 1024 * 1024; // 2MB, razonable para localStorage
+// Deben coincidir con los límites de la API (pm-pro-api/src/middleware/upload.middleware.ts).
+export const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024;
+export const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;

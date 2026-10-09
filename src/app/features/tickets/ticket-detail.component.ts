@@ -8,6 +8,7 @@ import { TicketStatus } from '../../core/models';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
 import { NotificationService } from '../../shared/services/notification.service';
 import { fileIcon, formatFileSize, MAX_ATTACHMENT_SIZE } from '../../shared/utils/file.util';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../../shared/pipes/labels.pipe';
 
 @Component({
@@ -54,7 +55,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
               @if (ticket()!.attachments?.length) {
                 <div class="attachments-row">
                   @for (a of ticket()!.attachments; track a.id) {
-                    <a class="attachment-chip" [href]="a.data" [download]="a.name">
+                    <a class="attachment-chip" [href]="a.url" target="_blank" rel="noopener">
                       <app-icon [name]="fileIcon(a.type)" [size]="14" /> {{ a.name }} <span class="attachment-size">({{ formatFileSize(a.size) }})</span>
                     </a>
                   }
@@ -81,7 +82,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
                       @if (r.attachments?.length) {
                         <div class="attachments-row">
                           @for (a of r.attachments; track a.id) {
-                            <a class="attachment-chip" [href]="a.data" [download]="a.name">
+                            <a class="attachment-chip" [href]="a.url" target="_blank" rel="noopener">
                               <app-icon [name]="fileIcon(a.type)" [size]="14" /> {{ a.name }} <span class="attachment-size">({{ formatFileSize(a.size) }})</span>
                             </a>
                           }
@@ -117,7 +118,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
                         </span>
                       }
                     </div>
-                    <button type="submit" class="btn-primary" [disabled]="replyForm.invalid">
+                    <button type="submit" class="btn-primary" [disabled]="replyForm.invalid || sending()">
                       <app-icon name="send" [size]="15" /> Enviar respuesta
                     </button>
                   </form>
@@ -234,7 +235,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
           </div>
         </div>
       </div>
-    } @else {
+    } @else if (loaded()) {
       <div class="not-found">
         <h2>Ticket no encontrado</h2>
         <a routerLink="/tickets"><app-icon name="chevron-left" [size]="14" /> Volver a tickets</a>
@@ -363,10 +364,12 @@ export class TicketDetailComponent implements OnInit {
 
   ticketId = signal('');
   ticket = computed(() => this.ticketService.getById(this.ticketId()));
-  replyAttachment = signal<{ name: string; type: string; size: number; data: string } | null>(null);
+  replyAttachment = signal<File | null>(null);
   selectedRating = signal(0);
   hoverRating = signal(0);
   ratingComment = signal('');
+  loaded = signal(false);
+  sending = signal(false);
 
   fileIcon = fileIcon;
   formatFileSize = formatFileSize;
@@ -374,13 +377,28 @@ export class TicketDetailComponent implements OnInit {
   replyForm = this.fb.group({ content: ['', Validators.required] });
 
   ngOnInit() {
-    this.ticketId.set(this.route.snapshot.paramMap.get('id') || '');
+    const id = this.route.snapshot.paramMap.get('id') || '';
+    this.ticketId.set(id);
+    loadPageData(this.notify, this.ticketService.loadDetail(id)).finally(() => this.loaded.set(true));
+  }
+
+  private async run(action: Promise<unknown>, successMessage: string): Promise<boolean> {
+    try {
+      await action;
+      this.notify.success(successMessage);
+      return true;
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+      return false;
+    }
   }
 
   submitRating() {
     if (this.selectedRating() === 0) return;
-    this.ticketService.rateSatisfaction(this.ticketId(), this.selectedRating(), this.ratingComment().trim() || undefined);
-    this.notify.success('¡Gracias por tu calificación!');
+    this.run(
+      this.ticketService.rateSatisfaction(this.ticketId(), this.selectedRating(), this.ratingComment().trim() || undefined),
+      '¡Gracias por tu calificación!',
+    );
   }
 
   statusActions(): { status: TicketStatus; label: string; icon: IconName; cls: string }[] {
@@ -393,47 +411,36 @@ export class TicketDetailComponent implements OnInit {
   }
 
   changeStatus(status: TicketStatus) {
-    this.ticketService.updateStatus(this.ticketId(), status);
-    this.notify.success('Estado del ticket actualizado.');
+    this.run(this.ticketService.updateStatus(this.ticketId(), status), 'Estado del ticket actualizado.');
   }
 
   onReplyAttachmentSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
+    input.value = '';
     if (!file) return;
     if (file.size > MAX_ATTACHMENT_SIZE) {
-      this.notify.error('El archivo es muy pesado (máximo 2MB).');
-      input.value = '';
+      this.notify.error(`El archivo es muy pesado (máximo ${formatFileSize(MAX_ATTACHMENT_SIZE)}).`);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => this.replyAttachment.set({
-      name: file.name,
-      type: file.name.split('.').pop()?.toLowerCase() || 'file',
-      size: file.size,
-      data: reader.result as string
-    });
-    reader.readAsDataURL(file);
+    this.replyAttachment.set(file);
   }
 
   clearReplyAttachment() {
     this.replyAttachment.set(null);
   }
 
-  sendReply() {
+  async sendReply() {
     if (this.replyForm.invalid) { this.replyForm.markAllAsTouched(); return; }
-    const user = this.auth.currentUser()!;
-    const attachment = this.replyAttachment();
-    this.ticketService.addResponse(this.ticketId(), {
-      ticketId: this.ticketId(),
-      authorId: user.id,
-      authorName: user.role === 'owner' ? 'Soporte Tikets y Proceso' : user.name,
-      authorRole: user.role,
-      content: this.replyForm.value.content!,
-      attachments: attachment ? [{ id: 'ta' + Date.now(), ...attachment }] : []
-    });
-    this.replyForm.reset();
-    this.replyAttachment.set(null);
-    this.notify.success('Respuesta enviada.');
+    this.sending.set(true);
+    const ok = await this.run(
+      this.ticketService.addResponse(this.ticketId(), this.replyForm.value.content!, this.replyAttachment() ?? undefined),
+      'Respuesta enviada.',
+    );
+    this.sending.set(false);
+    if (ok) {
+      this.replyForm.reset();
+      this.replyAttachment.set(null);
+    }
   }
 }

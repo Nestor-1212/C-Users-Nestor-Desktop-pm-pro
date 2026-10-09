@@ -1,12 +1,15 @@
 import { Component, inject, signal, computed } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterOutlet, RouterLink, RouterLinkActive, Router, NavigationEnd, ActivatedRoute } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { interval } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { AuthService } from '../../core/services/auth.service';
 import { TicketService } from '../../core/services/ticket.service';
 import { NotificationCenterService } from '../../core/services/notification-center.service';
-import { UserService } from '../../core/services/user.service';
+import { CompanyService } from '../../core/services/company.service';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { NotificationService } from '../services/notification.service';
 import { IconComponent } from '../icon/icon.component';
 
@@ -382,7 +385,7 @@ export class LayoutComponent {
   auth = inject(AuthService);
   private ticketService = inject(TicketService);
   private notificationCenter = inject(NotificationCenterService);
-  private userService = inject(UserService);
+  private companyService = inject(CompanyService);
   private notify = inject(NotificationService);
   private fb = inject(FormBuilder);
   private router = inject(Router);
@@ -400,19 +403,23 @@ export class LayoutComponent {
     newPassword: ['', [Validators.required, Validators.minLength(6)]]
   });
 
-  myNotifications = computed(() => {
-    const user = this.auth.currentUser();
-    if (!user) return [];
-    return this.notificationCenter.forUser(user);
-  });
-  unreadCount = computed(() => {
-    const user = this.auth.currentUser();
-    return user ? this.notificationCenter.unreadCount(user) : 0;
-  });
+  myNotifications = this.notificationCenter.items;
+  unreadCount = computed(() => this.notificationCenter.unreadCount());
+
+  private static readonly NOTIFICATIONS_REFRESH_MS = 30_000;
 
   constructor() {
     this.updatePageTitle();
-    this.router.events.pipe(filter(e => e instanceof NavigationEnd)).subscribe(() => this.updatePageTitle());
+    this.router.events
+      .pipe(filter(e => e instanceof NavigationEnd), takeUntilDestroyed())
+      .subscribe(() => this.updatePageTitle());
+
+    // Datos comunes a toda la app: campana, contador de tickets abiertos y, para clientes, su empresa (logo, plan).
+    loadPageData(this.notify, this.notificationCenter.load(), this.ticketService.load(), this.companyService.load());
+    // Refresco periódico silencioso: refleja acciones de otros usuarios sin recargar la página.
+    interval(LayoutComponent.NOTIFICATIONS_REFRESH_MS)
+      .pipe(takeUntilDestroyed())
+      .subscribe(() => this.notificationCenter.load().catch(() => undefined));
   }
 
   private updatePageTitle() {
@@ -433,28 +440,25 @@ export class LayoutComponent {
   }
   closeAccountModal() { this.accountModalOpen.set(false); }
 
-  changePassword() {
+  async changePassword() {
     if (this.passwordForm.invalid) { this.passwordForm.markAllAsTouched(); return; }
-    const user = this.auth.currentUser();
-    if (!user) return;
     const { currentPassword, newPassword } = this.passwordForm.value;
-    const ok = this.userService.changeOwnPassword(user.id, currentPassword!, newPassword!);
-    if (ok) {
+    try {
+      await this.auth.changePassword(currentPassword!, newPassword!);
       this.passwordError.set('');
       this.closeAccountModal();
       this.notify.success('Contraseña actualizada correctamente.');
-    } else {
-      this.passwordError.set('La contraseña actual no es correcta.');
+    } catch (err) {
+      this.passwordError.set(apiErrorMessage(err));
     }
   }
 
   markAllRead() {
-    const user = this.auth.currentUser();
-    if (user) this.notificationCenter.markAllRead(user);
+    this.notificationCenter.markAllRead().catch(err => this.notify.error(apiErrorMessage(err)));
   }
 
   openNotification(id: string) {
-    this.notificationCenter.markRead(id);
+    this.notificationCenter.markRead(id).catch(() => undefined);
     this.notifOpen.set(false);
   }
 

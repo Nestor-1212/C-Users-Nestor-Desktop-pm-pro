@@ -7,6 +7,8 @@ import { ProjectService } from '../../core/services/project.service';
 import { TicketService } from '../../core/services/ticket.service';
 import { ActivityLogService } from '../../core/services/activity-log.service';
 import { InvoiceService } from '../../core/services/invoice.service';
+import { NotificationService } from '../../shared/services/notification.service';
+import { loadPageData } from '../../core/http/api-error';
 import { Project, Ticket } from '../../core/models';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
@@ -357,8 +359,17 @@ export class DashboardComponent {
   private ticketService = inject(TicketService);
   private activityLog = inject(ActivityLogService);
   private invoiceService = inject(InvoiceService);
+  private notify = inject(NotificationService);
 
   recentActivity = computed(() => this.activityLog.getRecent(6));
+
+  constructor() {
+    const loads: Promise<unknown>[] = [this.projectService.load(), this.ticketService.load()];
+    if (this.auth.isOwner()) {
+      loads.push(this.companyService.load(), this.invoiceService.load(), this.activityLog.load());
+    }
+    loadPageData(this.notify, ...loads);
+  }
 
   today = new Date().toLocaleDateString('es-GT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 

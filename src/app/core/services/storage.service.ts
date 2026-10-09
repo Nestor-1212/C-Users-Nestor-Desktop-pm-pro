@@ -19,12 +19,6 @@ export class StorageService {
     localStorage.removeItem(PREFIX + key);
   }
 
-  clear(): void {
-    Object.keys(localStorage)
-      .filter(k => k.startsWith(PREFIX))
-      .forEach(k => localStorage.removeItem(k));
-  }
-
   getSession<T>(key: string): T | null {
     try {
       const val = sessionStorage.getItem(PREFIX + key);

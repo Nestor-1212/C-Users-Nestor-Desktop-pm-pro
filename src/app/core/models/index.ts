@@ -1,13 +1,13 @@
 export interface User {
   id: string;
   username: string;
-  password: string;
   role: 'owner' | 'client';
   companyId?: string;
   name: string;
   email: string;
-  avatar?: string;
 }
+
+export type CompanyPlan = 'Basic' | 'Standard' | 'Premium';
 
 export interface Company {
   id: string;
@@ -17,7 +17,8 @@ export interface Company {
   address?: string;
   status: 'active' | 'inactive';
   createdAt: string;
-  plan?: string;
+  plan: CompanyPlan;
+  /** URL absoluta del logo servido por la API. */
   logo?: string;
 }
 
@@ -54,7 +55,7 @@ export interface ProjectDocument {
   size: number;
   uploadedBy: string;
   uploadedAt: string;
-  data?: string; // base64 para descarga real
+  url: string;
 }
 
 export interface Project {
@@ -72,6 +73,10 @@ export interface Project {
   tags?: string[];
   createdAt: string;
   updatedAt: string;
+  /** Contadores: la lista de la API no trae los arreglos completos (solo el detalle). */
+  commentCount: number;
+  requirementCount: number;
+  documentCount: number;
   comments: ProjectComment[];
   requirements: ProjectRequirement[];
   documents: ProjectDocument[];
@@ -85,7 +90,7 @@ export interface TicketAttachment {
   name: string;
   type: string;
   size: number;
-  data: string; // base64
+  url: string;
 }
 
 export interface TicketResponse {
@@ -118,6 +123,8 @@ export interface Invoice {
   issueDate: string;
   dueDate: string;
   status: 'pending' | 'paid';
+  /** Calculado por el servidor con la zona horaria del negocio. */
+  overdue: boolean;
   paidAt?: string;
   createdAt: string;
 }
@@ -146,6 +153,7 @@ export interface Ticket {
   updatedAt: string;
   slaDeadline: string;
   resolvedAt?: string;
+  responseCount: number;
   responses: TicketResponse[];
   attachments?: TicketAttachment[];
   satisfactionRating?: number;

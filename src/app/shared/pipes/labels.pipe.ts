@@ -25,7 +25,7 @@ export const TICKET_STATUS_LABELS: Record<string, string> = {
   closed: 'Cerrado',
 };
 
-const PRIORITY_LABELS: Record<string, string> = {
+export const PRIORITY_LABELS: Record<string, string> = {
   low: 'Baja',
   medium: 'Media',
   high: 'Alta',

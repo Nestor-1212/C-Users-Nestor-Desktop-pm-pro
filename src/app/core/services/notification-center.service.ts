@@ -1,64 +1,37 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { StorageService } from './storage.service';
-import { AppNotification, User } from '../models';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { AppNotification } from '../models';
+import { API_URL } from '../config/api.config';
+import { toNotification } from '../http/mappers';
 
 /**
- * Historial persistente de eventos ("te respondieron", "nuevo ticket", etc.),
- * distinto del NotificationService (toasts efímeros de confirmación de la
- * propia acción del usuario). Este sobrevive a recargas y se consulta desde
- * el centro de notificaciones del layout.
+ * Historial de eventos ("te respondieron", "nuevo ticket"...). Las genera el
+ * servidor al ocurrir cada acción y ya llegan filtradas para el usuario actual.
+ * Distinto de NotificationService (toasts de confirmación de la propia acción).
  */
 @Injectable({ providedIn: 'root' })
 export class NotificationCenterService {
-  private storage = inject(StorageService);
+  private http = inject(HttpClient);
   private _items = signal<AppNotification[]>([]);
   items = this._items.asReadonly();
 
-  private static readonly MAX_ITEMS = 200;
-
-  constructor() {
-    this._items.set(this.storage.get<AppNotification[]>('notifications') || []);
+  async load(): Promise<void> {
+    const res = await firstValueFrom(this.http.get<{ items: any[] }>(`${API_URL}/notifications`));
+    this._items.set(res.items.map(toNotification));
   }
 
-  private save(items: AppNotification[]) {
-    this._items.set(items);
-    this.storage.set('notifications', items);
+  unreadCount(): number {
+    return this._items().filter(n => !n.read).length;
   }
 
-  notifyOwner(title: string, message: string, link: string): void {
-    this.push({ recipientRole: 'owner', title, message, link });
+  async markRead(id: string): Promise<void> {
+    this._items.update(list => list.map(n => n.id === id ? { ...n, read: true } : n));
+    await firstValueFrom(this.http.patch(`${API_URL}/notifications/${id}/read`, {}));
   }
 
-  notifyCompany(companyId: string, title: string, message: string, link: string): void {
-    this.push({ recipientRole: 'client', recipientCompanyId: companyId, title, message, link });
-  }
-
-  private push(data: Omit<AppNotification, 'id' | 'read' | 'createdAt'>): void {
-    const notification: AppNotification = {
-      ...data,
-      id: 'n' + Date.now() + Math.random().toString(36).slice(2, 7),
-      read: false,
-      createdAt: new Date().toISOString()
-    };
-    this.save([notification, ...this._items()].slice(0, NotificationCenterService.MAX_ITEMS));
-  }
-
-  forUser(user: User): AppNotification[] {
-    return this._items().filter(n =>
-      n.recipientRole === user.role && (user.role === 'owner' || n.recipientCompanyId === user.companyId)
-    );
-  }
-
-  unreadCount(user: User): number {
-    return this.forUser(user).filter(n => !n.read).length;
-  }
-
-  markRead(id: string): void {
-    this.save(this._items().map(n => n.id === id ? { ...n, read: true } : n));
-  }
-
-  markAllRead(user: User): void {
-    const ids = new Set(this.forUser(user).map(n => n.id));
-    this.save(this._items().map(n => ids.has(n.id) ? { ...n, read: true } : n));
+  async markAllRead(): Promise<void> {
+    this._items.update(list => list.map(n => ({ ...n, read: true })));
+    await firstValueFrom(this.http.patch(`${API_URL}/notifications/read-all`, {}));
   }
 }

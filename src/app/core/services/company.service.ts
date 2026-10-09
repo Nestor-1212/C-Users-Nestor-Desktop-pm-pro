@@ -1,23 +1,44 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { StorageService } from './storage.service';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { Company, CompanyPlan } from '../models';
+import { API_URL } from '../config/api.config';
+import { toCompany, planToApi, upper, upsert } from '../http/mappers';
 import { AuthService } from './auth.service';
-import { ActivityLogService } from './activity-log.service';
-import { Company } from '../models';
-import { MOCK_COMPANIES } from './mock-data';
+
+export interface CompanyInput {
+  name: string;
+  email: string;
+  phone: string;
+  address?: string;
+  plan: CompanyPlan;
+  status: 'active' | 'inactive';
+}
+
+const toApiBody = (d: Partial<CompanyInput>) => ({
+  ...d,
+  ...(d.plan && { plan: planToApi(d.plan) }),
+  ...(d.status && { status: upper(d.status) }),
+});
 
 @Injectable({ providedIn: 'root' })
 export class CompanyService {
-  private storage = inject(StorageService);
+  private http = inject(HttpClient);
   private auth = inject(AuthService);
-  private activityLog = inject(ActivityLogService);
   private _companies = signal<Company[]>([]);
   companies = this._companies.asReadonly();
 
-  constructor() {
-    if (!this.storage.get('companies')) {
-      this.storage.set('companies', MOCK_COMPANIES);
+  /** El owner carga todas; un cliente solo la suya (para logo y plan → SLA). */
+  async load(): Promise<void> {
+    const user = this.auth.currentUser();
+    if (!user) return;
+    if (user.role === 'owner') {
+      const list = await firstValueFrom(this.http.get<any[]>(`${API_URL}/companies`));
+      this._companies.set(list.map(toCompany));
+    } else if (user.companyId) {
+      const c = await firstValueFrom(this.http.get<any>(`${API_URL}/companies/${user.companyId}`));
+      this._companies.set([toCompany(c)]);
     }
-    this._companies.set(this.storage.get<Company[]>('companies') || []);
   }
 
   getAll(): Company[] { return this._companies(); }
@@ -26,37 +47,30 @@ export class CompanyService {
     return this._companies().find(c => c.id === id);
   }
 
-  create(data: Omit<Company, 'id' | 'createdAt'>): Company {
-    const company: Company = {
-      ...data,
-      id: 'c' + Date.now(),
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-    const updated = [...this._companies(), company];
-    this._companies.set(updated);
-    this.storage.set('companies', updated);
-    this.logActivity('company', company.id, `creó la empresa "${company.name}"`);
-    return company;
+  async create(data: CompanyInput, logo?: File): Promise<Company> {
+    let c = toCompany(await firstValueFrom(this.http.post<any>(`${API_URL}/companies`, toApiBody(data))));
+    if (logo) c = await this.uploadLogo(c.id, logo);
+    this._companies.update(list => upsert(list, c));
+    return c;
   }
 
-  update(id: string, data: Partial<Company>): void {
-    const updated = this._companies().map(c => c.id === id ? { ...c, ...data } : c);
-    this._companies.set(updated);
-    this.storage.set('companies', updated);
-    const company = updated.find(c => c.id === id);
-    if (company) this.logActivity('company', id, `editó la empresa "${company.name}"`);
+  /** `logo`: File = reemplazar, null = quitar, undefined = no tocar. */
+  async update(id: string, data: Partial<CompanyInput>, logo?: File | null): Promise<Company> {
+    let c = toCompany(await firstValueFrom(this.http.patch<any>(`${API_URL}/companies/${id}`, toApiBody(data))));
+    if (logo instanceof File) c = await this.uploadLogo(id, logo);
+    else if (logo === null) c = toCompany(await firstValueFrom(this.http.delete<any>(`${API_URL}/companies/${id}/logo`)));
+    this._companies.update(list => upsert(list, c));
+    return c;
   }
 
-  delete(id: string): void {
-    const company = this.getById(id);
-    const updated = this._companies().filter(c => c.id !== id);
-    this._companies.set(updated);
-    this.storage.set('companies', updated);
-    if (company) this.logActivity('company', id, `eliminó la empresa "${company.name}"`);
+  async delete(id: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`${API_URL}/companies/${id}`));
+    this._companies.update(list => list.filter(c => c.id !== id));
   }
 
-  private logActivity(entityType: 'company', entityId: string, description: string) {
-    const actor = this.auth.currentUser();
-    if (actor) this.activityLog.log(actor, entityType, entityId, description);
+  private async uploadLogo(id: string, file: File): Promise<Company> {
+    const form = new FormData();
+    form.append('file', file);
+    return toCompany(await firstValueFrom(this.http.post<any>(`${API_URL}/companies/${id}/logo`, form)));
   }
 }

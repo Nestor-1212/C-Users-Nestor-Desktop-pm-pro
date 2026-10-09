@@ -11,6 +11,7 @@ import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-tra
 import { ConfirmService } from '../../shared/services/confirm.service';
 import { NotificationService } from '../../shared/services/notification.service';
 import { isControlInvalid } from '../../shared/utils/form.util';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 
 @Component({
   selector: 'app-billing',
@@ -143,7 +144,7 @@ import { isControlInvalid } from '../../shared/utils/form.util';
             <div class="modal-footer">
               @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
-              <button type="submit" class="btn-primary" [disabled]="form.invalid">Crear factura</button>
+              <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">Crear factura</button>
             </div>
           </form>
         </div>
@@ -212,8 +213,13 @@ export class BillingComponent {
   statusFilter = signal('');
   companyFilter = signal('');
   showModal = signal(false);
+  saving = signal(false);
 
   companies = this.companyService.companies;
+
+  constructor() {
+    loadPageData(this.notify, this.invoiceService.load(), ...(this.auth.isOwner() ? [this.companyService.load()] : []));
+  }
 
   form = this.fb.group({
     companyId: ['', Validators.required],
@@ -263,20 +269,27 @@ export class BillingComponent {
   }
   closeModal() { this.showModal.set(false); }
 
-  saveInvoice() {
+  private async run(action: Promise<unknown>, successMessage: string): Promise<boolean> {
+    try {
+      await action;
+      this.notify.success(successMessage);
+      return true;
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+      return false;
+    }
+  }
+
+  async saveInvoice() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
-    const v = this.form.value;
-    const company = this.companyService.getById(v.companyId!);
-    this.invoiceService.create({
-      companyId: v.companyId!,
-      companyName: company?.name || '',
-      concept: v.concept!,
-      amount: v.amount!,
-      issueDate: new Date().toISOString().split('T')[0],
-      dueDate: v.dueDate!
-    });
-    this.notify.success('Factura creada correctamente.');
-    this.closeModal();
+    const v = this.form.getRawValue();
+    this.saving.set(true);
+    // La fecha de emisión la fija el servidor (zona horaria del negocio).
+    const ok = await this.run(this.invoiceService.create({
+      companyId: v.companyId!, concept: v.concept!, amount: Number(v.amount), dueDate: v.dueDate!,
+    }), 'Factura creada correctamente.');
+    this.saving.set(false);
+    if (ok) this.closeModal();
   }
 
   async markPaid(inv: Invoice) {
@@ -286,8 +299,7 @@ export class BillingComponent {
       confirmLabel: 'Marcar pagada'
     });
     if (!ok) return;
-    this.invoiceService.markPaid(inv.id);
-    this.notify.success('Factura marcada como pagada.');
+    this.run(this.invoiceService.markPaid(inv.id), 'Factura marcada como pagada.');
   }
 
   async deleteInvoice(inv: Invoice) {
@@ -298,7 +310,6 @@ export class BillingComponent {
       danger: true
     });
     if (!ok) return;
-    this.invoiceService.delete(inv.id);
-    this.notify.success('Factura eliminada correctamente.');
+    this.run(this.invoiceService.delete(inv.id), 'Factura eliminada correctamente.');
   }
 }

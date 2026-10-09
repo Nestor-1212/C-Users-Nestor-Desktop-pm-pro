@@ -1,28 +1,26 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { StorageService } from './storage.service';
-import { AuthService } from './auth.service';
-import { ActivityLogService } from './activity-log.service';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { Invoice } from '../models';
-import { MOCK_INVOICES } from './mock-data';
+import { API_URL } from '../config/api.config';
+import { toInvoice, upsert } from '../http/mappers';
+
+export interface InvoiceInput {
+  companyId: string;
+  concept: string;
+  amount: number;
+  dueDate: string;
+}
 
 @Injectable({ providedIn: 'root' })
 export class InvoiceService {
-  private storage = inject(StorageService);
-  private auth = inject(AuthService);
-  private activityLog = inject(ActivityLogService);
+  private http = inject(HttpClient);
   private _invoices = signal<Invoice[]>([]);
   invoices = this._invoices.asReadonly();
 
-  constructor() {
-    if (!this.storage.get('invoices')) {
-      this.storage.set('invoices', MOCK_INVOICES);
-    }
-    this._invoices.set(this.storage.get<Invoice[]>('invoices') || []);
-  }
-
-  private save(invoices: Invoice[]) {
-    this._invoices.set(invoices);
-    this.storage.set('invoices', invoices);
+  async load(): Promise<void> {
+    const res = await firstValueFrom(this.http.get<{ invoices: any[] }>(`${API_URL}/invoices`));
+    this._invoices.set(res.invoices.map(toInvoice));
   }
 
   getAll(): Invoice[] { return this._invoices(); }
@@ -35,35 +33,28 @@ export class InvoiceService {
     return this._invoices().find(i => i.id === id);
   }
 
-  create(data: Omit<Invoice, 'id' | 'createdAt' | 'status' | 'paidAt'>): Invoice {
-    const invoice: Invoice = { ...data, id: 'inv' + Date.now(), status: 'pending', createdAt: new Date().toISOString() };
-    this.save([...this._invoices(), invoice]);
-    this.logActivity(invoice.id, `creó una factura de Q${invoice.amount.toLocaleString('es-GT')} para "${invoice.companyName}"`);
-    return invoice;
+  async create(data: InvoiceInput): Promise<Invoice> {
+    const inv = toInvoice(await firstValueFrom(this.http.post<any>(`${API_URL}/invoices`, data)));
+    this._invoices.update(list => upsert(list, inv));
+    return inv;
   }
 
-  markPaid(id: string): void {
-    const invoice = this.getById(id);
-    this.save(this._invoices().map(i => i.id === id ? { ...i, status: 'paid' as const, paidAt: new Date().toISOString() } : i));
-    if (invoice) this.logActivity(id, `marcó como pagada la factura de "${invoice.companyName}" (Q${invoice.amount.toLocaleString('es-GT')})`);
+  async markPaid(id: string): Promise<void> {
+    const inv = toInvoice(await firstValueFrom(this.http.post<any>(`${API_URL}/invoices/${id}/pay`, {})));
+    this._invoices.update(list => upsert(list, inv));
   }
 
-  delete(id: string): void {
-    const invoice = this.getById(id);
-    this.save(this._invoices().filter(i => i.id !== id));
-    if (invoice) this.logActivity(id, `eliminó una factura de "${invoice.companyName}" (Q${invoice.amount.toLocaleString('es-GT')})`);
+  async delete(id: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`${API_URL}/invoices/${id}`));
+    this._invoices.update(list => list.filter(i => i.id !== id));
   }
 
+  /** "Vencida" lo decide el servidor comparando fechas en la zona horaria del negocio. */
   isOverdue(invoice: Invoice): boolean {
-    return invoice.status === 'pending' && new Date(invoice.dueDate) < new Date();
+    return invoice.overdue;
   }
 
   totalPending(invoices?: Invoice[]): number {
     return (invoices ?? this._invoices()).filter(i => i.status === 'pending').reduce((sum, i) => sum + i.amount, 0);
-  }
-
-  private logActivity(entityId: string, description: string) {
-    const actor = this.auth.currentUser();
-    if (actor) this.activityLog.log(actor, 'invoice', entityId, description);
   }
 }

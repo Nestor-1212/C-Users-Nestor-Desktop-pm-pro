@@ -3,16 +3,17 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
-import { ProjectService } from '../../core/services/project.service';
+import { ProjectService, ProjectInput } from '../../core/services/project.service';
 import { CompanyService } from '../../core/services/company.service';
-import { Project } from '../../core/models';
+import { Project, ProjectPriority, ProjectStatus } from '../../core/models';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
 import { ConfirmService } from '../../shared/services/confirm.service';
 import { NotificationService } from '../../shared/services/notification.service';
 import { isControlInvalid } from '../../shared/utils/form.util';
 import { exportToExcel, exportToPdf } from '../../shared/utils/export.util';
-import { ProjectStatusLabelPipe, PriorityLabelPipe, PROJECT_STATUS_LABELS } from '../../shared/pipes/labels.pipe';
+import { ProjectStatusLabelPipe, PriorityLabelPipe, PROJECT_STATUS_LABELS, PRIORITY_LABELS } from '../../shared/pipes/labels.pipe';
 import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/export-menu.component';
 
 @Component({
@@ -104,15 +105,15 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
               <div class="project-stats">
                 <div class="mini-stat" title="Comentarios">
                   <app-icon name="message-circle" [size]="14" />
-                  <span class="mini-val">{{ p.comments.length }}</span>
+                  <span class="mini-val">{{ p.commentCount }}</span>
                 </div>
                 <div class="mini-stat" title="Requerimientos">
                   <app-icon name="clipboard" [size]="14" />
-                  <span class="mini-val">{{ p.requirements.length }}</span>
+                  <span class="mini-val">{{ p.requirementCount }}</span>
                 </div>
                 <div class="mini-stat" title="Documentos">
                   <app-icon name="paperclip" [size]="14" />
-                  <span class="mini-val">{{ p.documents.length }}</span>
+                  <span class="mini-val">{{ p.documentCount }}</span>
                 </div>
               </div>
               <div class="card-actions">
@@ -225,7 +226,7 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
             <div class="modal-footer">
               @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
-              <button type="submit" class="btn-primary" [disabled]="form.invalid">
+              <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">
                 {{ editingId() ? 'Guardar cambios' : 'Crear proyecto' }}
               </button>
             </div>
@@ -320,8 +321,13 @@ export class ProjectsComponent {
   companyFilter = signal('');
   showModal = signal(false);
   editingId = signal<string | null>(null);
+  saving = signal(false);
 
   allCompanies = this.companyService.companies;
+
+  constructor() {
+    loadPageData(this.notify, this.projectService.load(), ...(this.auth.isOwner() ? [this.companyService.load()] : []));
+  }
 
   form = this.fb.group({
     name: ['', Validators.required],
@@ -358,7 +364,7 @@ export class ProjectsComponent {
       { header: 'Nombre', value: (p: typeof rows[number]) => p.name },
       { header: 'Empresa', value: (p: typeof rows[number]) => this.getCompanyName(p.companyId) },
       { header: 'Estado', value: (p: typeof rows[number]) => PROJECT_STATUS_LABELS[p.status] ?? p.status },
-      { header: 'Prioridad', value: (p: typeof rows[number]) => p.priority },
+      { header: 'Prioridad', value: (p: typeof rows[number]) => PRIORITY_LABELS[p.priority] ?? p.priority },
       { header: 'Progreso (%)', value: (p: typeof rows[number]) => p.progress },
       { header: 'Inicio', value: (p: typeof rows[number]) => p.startDate },
       { header: 'Fin', value: (p: typeof rows[number]) => p.endDate },
@@ -391,18 +397,31 @@ export class ProjectsComponent {
     this.showModal.set(true);
   }
 
-  saveProject() {
+  async saveProject() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
-    const v = this.form.value as any;
-    v.tags = [];
-    if (this.editingId()) {
-      this.projectService.editProject(this.editingId()!, v);
-      this.notify.success('Proyecto actualizado correctamente.');
-    } else {
-      this.projectService.create(v);
-      this.notify.success('Proyecto creado correctamente.');
+    const v = this.form.getRawValue();
+    const data: ProjectInput = {
+      name: v.name!, description: v.description!, companyId: v.companyId!,
+      status: v.status as ProjectStatus, priority: v.priority as ProjectPriority, progress: v.progress ?? 0,
+      startDate: v.startDate!, endDate: v.endDate!,
+      budget: v.budget ?? null, internalNotes: v.internalNotes || null,
+    };
+    this.saving.set(true);
+    try {
+      if (this.editingId()) {
+        // Sin "tags": el formulario no las edita, así que no se tocan las existentes.
+        await this.projectService.update(this.editingId()!, data);
+        this.notify.success('Proyecto actualizado correctamente.');
+      } else {
+        await this.projectService.create({ ...data, tags: [] });
+        this.notify.success('Proyecto creado correctamente.');
+      }
+      this.closeModal();
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    } finally {
+      this.saving.set(false);
     }
-    this.closeModal();
   }
 
   async deleteProject(id: string, name: string) {
@@ -413,7 +432,11 @@ export class ProjectsComponent {
       danger: true
     });
     if (!ok) return;
-    this.projectService.delete(id);
-    this.notify.success('Proyecto eliminado correctamente.');
+    try {
+      await this.projectService.delete(id);
+      this.notify.success('Proyecto eliminado correctamente.');
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    }
   }
 }

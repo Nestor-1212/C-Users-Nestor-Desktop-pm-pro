@@ -1,9 +1,10 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
-import { CompanyService } from '../../core/services/company.service';
+import { CompanyService, CompanyInput } from '../../core/services/company.service';
 import { ProjectService } from '../../core/services/project.service';
-import { Company } from '../../core/models';
+import { Company, CompanyPlan } from '../../core/models';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
 import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
@@ -170,7 +171,7 @@ import { isControlInvalid } from '../../shared/utils/form.util';
             <div class="modal-footer">
               @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
-              <button type="submit" class="btn-primary" [disabled]="form.invalid">
+              <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">
                 {{ editingId() ? 'Guardar cambios' : 'Crear empresa' }}
               </button>
             </div>
@@ -271,16 +272,24 @@ export class CompaniesComponent {
   statusFilter = signal('');
   showModal = signal(false);
   editingId = signal<string | null>(null);
+  saving = signal(false);
+  /** Cambio pendiente de logo: File = subir, null = quitar, undefined = sin cambios. */
+  private logoChange: File | null | undefined;
 
   form = this.fb.group({
     name: ['', Validators.required],
     email: ['', [Validators.required, Validators.email]],
     phone: ['', Validators.required],
     address: [''],
-    plan: ['Standard'],
-    status: ['active'],
+    plan: ['Standard' as CompanyPlan],
+    status: ['active' as 'active' | 'inactive'],
+    /** Solo para la vista previa (URL existente o local del archivo elegido). */
     logo: ['']
   });
+
+  constructor() {
+    loadPageData(this.notify, this.companyService.load(), this.projectService.load());
+  }
 
   activeCount = computed(() => this.companies().filter(c => c.status === 'active').length);
   inactiveCount = computed(() => this.companies().filter(c => c.status === 'inactive').length);
@@ -317,12 +326,18 @@ export class CompaniesComponent {
     return '';
   }
 
-  openModal() { this.editingId.set(null); this.form.reset({ plan: 'Standard', status: 'active', logo: '' }); this.showModal.set(true); }
+  openModal() {
+    this.editingId.set(null);
+    this.logoChange = undefined;
+    this.form.reset({ plan: 'Standard', status: 'active', logo: '' });
+    this.showModal.set(true);
+  }
   closeModal() { this.showModal.set(false); this.editingId.set(null); }
 
   editCompany(c: Company) {
     this.editingId.set(c.id);
-    this.form.patchValue(c);
+    this.logoChange = undefined;
+    this.form.reset({ ...c, address: c.address ?? '', logo: c.logo ?? '' });
     this.showModal.set(true);
   }
 
@@ -340,33 +355,45 @@ export class CompaniesComponent {
       input.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => this.form.patchValue({ logo: reader.result as string });
-    reader.readAsDataURL(file);
+    this.logoChange = file;
+    this.form.patchValue({ logo: URL.createObjectURL(file) });
   }
 
   clearLogo() {
+    // Al crear no hay logo que borrar en el servidor; al editar, se elimina.
+    this.logoChange = this.editingId() ? null : undefined;
     this.form.patchValue({ logo: '' });
   }
 
-  saveCompany() {
+  async saveCompany() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
-    const v = this.form.value as any;
-    if (this.editingId()) {
-      this.companyService.update(this.editingId()!, v);
-      this.notify.success('Empresa actualizada correctamente.');
-    } else {
-      this.companyService.create(v);
-      this.notify.success('Empresa creada correctamente.');
+    const { logo: _preview, ...v } = this.form.getRawValue();
+    const data: CompanyInput = {
+      name: v.name!, email: v.email!, phone: v.phone!, address: v.address || undefined,
+      plan: v.plan!, status: v.status!,
+    };
+    this.saving.set(true);
+    try {
+      if (this.editingId()) {
+        await this.companyService.update(this.editingId()!, data, this.logoChange);
+        this.notify.success('Empresa actualizada correctamente.');
+      } else {
+        await this.companyService.create(data, this.logoChange ?? undefined);
+        this.notify.success('Empresa creada correctamente.');
+      }
+      this.closeModal();
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    } finally {
+      this.saving.set(false);
     }
-    this.closeModal();
   }
 
   async deleteCompany(id: string, name: string) {
     const projectCount = this.getProjectCount(id);
     const extra = projectCount > 0
-      ? ` Tiene ${projectCount} proyecto${projectCount !== 1 ? 's' : ''} asociado${projectCount !== 1 ? 's' : ''} que no se eliminarán automáticamente.`
-      : '';
+      ? ` También se eliminarán sus ${projectCount} proyecto${projectCount !== 1 ? 's' : ''}, sus tickets, facturas y cuentas de usuario.`
+      : ' También se eliminarán sus tickets, facturas y cuentas de usuario.';
     const ok = await this.confirm.ask({
       title: 'Eliminar empresa',
       message: `¿Eliminar "${name}"? Esta acción no se puede deshacer.${extra}`,
@@ -374,7 +401,11 @@ export class CompaniesComponent {
       danger: true
     });
     if (!ok) return;
-    this.companyService.delete(id);
-    this.notify.success('Empresa eliminada correctamente.');
+    try {
+      await this.companyService.delete(id);
+      this.notify.success('Empresa eliminada correctamente.');
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    }
   }
 }

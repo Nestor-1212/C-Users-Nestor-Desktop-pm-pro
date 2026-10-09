@@ -3,6 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { AuthService } from '../../core/services/auth.service';
+import { apiErrorMessage } from '../../core/http/api-error';
 import { IconComponent } from '../../shared/icon/icon.component';
 
 @Component({
@@ -260,16 +261,18 @@ export class LoginComponent {
     this.errorMsg.set('');
   }
 
-  submit() {
+  async submit() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     this.loading.set(true);
     this.errorMsg.set('');
     const { username, password, remember } = this.form.value;
-    setTimeout(() => {
-      const ok = this.auth.login(username!, password!, remember!);
-      if (ok) this.router.navigate(['/dashboard']);
-      else this.errorMsg.set('Usuario o contraseña incorrectos.');
+    try {
+      await this.auth.login(username!, password!, remember!);
+      await this.router.navigate(['/dashboard']);
+    } catch (err) {
+      this.errorMsg.set(apiErrorMessage(err, 'Usuario o contraseña incorrectos.'));
+    } finally {
       this.loading.set(false);
-    }, 600);
+    }
   }
 }

@@ -2,6 +2,8 @@ import { Component, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TicketService } from '../../core/services/ticket.service';
 import { InvoiceService } from '../../core/services/invoice.service';
+import { NotificationService } from '../../shared/services/notification.service';
+import { loadPageData } from '../../core/http/api-error';
 import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
 import { CATEGORY_LABELS } from '../../shared/pipes/labels.pipe';
 
@@ -117,6 +119,11 @@ interface BarPoint { label: string; value: number; pct: number; }
 export class AnalyticsComponent {
   private ticketService = inject(TicketService);
   private invoiceService = inject(InvoiceService);
+  private notify = inject(NotificationService);
+
+  constructor() {
+    loadPageData(this.notify, this.ticketService.load(), this.invoiceService.load());
+  }
 
   private lastNWeeks(n: number): { start: Date; end: Date; label: string }[] {
     const weeks: { start: Date; end: Date; label: string }[] = [];

@@ -1,35 +1,27 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { StorageService } from './storage.service';
-import { AuthService } from './auth.service';
-import { ActivityLogService } from './activity-log.service';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { User } from '../models';
-import { MOCK_USERS } from './mock-data';
+import { API_URL } from '../config/api.config';
+import { toUser, upsert } from '../http/mappers';
 
-/**
- * Gestión de cuentas de usuario (antes solo existían los 4 usuarios semilla,
- * uno por empresa, hardcodeados en mock-data y sin forma de administrarlos).
- * Comparte la misma clave de storage ('users') que ya leía AuthService.login(),
- * así que cualquier alta/edición/reseteo de contraseña hecho aquí se refleja
- * de inmediato en el siguiente inicio de sesión.
- */
+export interface UserInput {
+  name: string;
+  username: string;
+  email: string;
+  companyId: string;
+}
+
+/** Cuentas de las empresas cliente (solo el owner las administra). */
 @Injectable({ providedIn: 'root' })
 export class UserService {
-  private storage = inject(StorageService);
-  private auth = inject(AuthService);
-  private activityLog = inject(ActivityLogService);
+  private http = inject(HttpClient);
   private _users = signal<User[]>([]);
   users = this._users.asReadonly();
 
-  constructor() {
-    if (!this.storage.get('users')) {
-      this.storage.set('users', MOCK_USERS);
-    }
-    this._users.set(this.storage.get<User[]>('users') || []);
-  }
-
-  private save(users: User[]) {
-    this._users.set(users);
-    this.storage.set('users', users);
+  async load(): Promise<void> {
+    const list = await firstValueFrom(this.http.get<any[]>(`${API_URL}/users`));
+    this._users.set(list.map(toUser));
   }
 
   getAll(): User[] { return this._users(); }
@@ -42,50 +34,29 @@ export class UserService {
     return this._users().find(u => u.id === id);
   }
 
+  /** Validación rápida en el formulario; el servidor la vuelve a aplicar (409). */
   isUsernameTaken(username: string, excludeId?: string): boolean {
     return this._users().some(u => u.username === username && u.id !== excludeId);
   }
 
-  create(data: Omit<User, 'id'>): User {
-    const user: User = { ...data, id: 'u' + Date.now() };
-    this.save([...this._users(), user]);
-    this.logActivity(user.id, `creó el usuario "${user.name}" (@${user.username})`);
-    return user;
+  async create(data: UserInput & { password: string }): Promise<User> {
+    const u = toUser(await firstValueFrom(this.http.post<any>(`${API_URL}/users`, data)));
+    this._users.update(list => upsert(list, u));
+    return u;
   }
 
-  update(id: string, data: Partial<Omit<User, 'id' | 'password'>>): void {
-    this.save(this._users().map(u => u.id === id ? { ...u, ...data } : u));
-    const user = this.getById(id);
-    if (user) this.logActivity(id, `editó el usuario "${user.name}" (@${user.username})`);
+  async update(id: string, data: Partial<UserInput>): Promise<User> {
+    const u = toUser(await firstValueFrom(this.http.patch<any>(`${API_URL}/users/${id}`, data)));
+    this._users.update(list => upsert(list, u));
+    return u;
   }
 
-  resetPassword(id: string, newPassword: string): void {
-    const target = this.getById(id);
-    this.save(this._users().map(u => u.id === id ? { ...u, password: newPassword } : u));
-    if (!target) return;
-    const actor = this.auth.currentUser();
-    const description = actor?.id === id
-      ? 'cambió su propia contraseña'
-      : `restableció la contraseña de "${target.name}" (@${target.username})`;
-    this.logActivity(id, description);
+  async resetPassword(id: string, newPassword: string): Promise<void> {
+    await firstValueFrom(this.http.post(`${API_URL}/users/${id}/reset-password`, { newPassword }));
   }
 
-  /** Cambia la contraseña del propio usuario, verificando la actual. Devuelve false si no coincide. */
-  changeOwnPassword(id: string, currentPassword: string, newPassword: string): boolean {
-    const user = this.getById(id);
-    if (!user || user.password !== currentPassword) return false;
-    this.resetPassword(id, newPassword);
-    return true;
-  }
-
-  delete(id: string): void {
-    const user = this.getById(id);
-    this.save(this._users().filter(u => u.id !== id));
-    if (user) this.logActivity(id, `eliminó el usuario "${user.name}" (@${user.username})`);
-  }
-
-  private logActivity(entityId: string, description: string) {
-    const actor = this.auth.currentUser();
-    if (actor) this.activityLog.log(actor, 'user', entityId, description);
+  async delete(id: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`${API_URL}/users/${id}`));
+    this._users.update(list => list.filter(u => u.id !== id));
   }
 }

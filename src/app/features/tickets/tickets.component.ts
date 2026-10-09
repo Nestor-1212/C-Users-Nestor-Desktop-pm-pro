@@ -10,9 +10,11 @@ import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
 import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
 import { NotificationService } from '../../shared/services/notification.service';
 import { isControlInvalid } from '../../shared/utils/form.util';
+import { Ticket, TicketPriority } from '../../core/models';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { fileIcon, formatFileSize, MAX_ATTACHMENT_SIZE } from '../../shared/utils/file.util';
 import { exportToExcel, exportToPdf } from '../../shared/utils/export.util';
-import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe, TICKET_STATUS_LABELS } from '../../shared/pipes/labels.pipe';
+import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe, TICKET_STATUS_LABELS, CATEGORY_LABELS, PRIORITY_LABELS } from '../../shared/pipes/labels.pipe';
 import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/export-menu.component';
 
 @Component({
@@ -94,8 +96,8 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
                 <span class="meta-chip"><app-icon name="tag" [size]="12" /> {{ t.category | categoryLabel }}</span>
                 <span class="meta-chip"><app-icon name="calendar" [size]="12" /> {{ t.createdAt | date:'dd/MM/yyyy HH:mm' }}</span>
                 <span class="meta-chip"><app-icon name="clock" [size]="12" /> SLA: {{ t.slaDeadline | date:'dd/MM/yyyy HH:mm' }}</span>
-                @if (t.responses.length > 0) {
-                  <span class="meta-chip responses"><app-icon name="message-circle" [size]="12" /> {{ t.responses.length }} respuesta(s)</span>
+                @if (t.responseCount > 0) {
+                  <span class="meta-chip responses"><app-icon name="message-circle" [size]="12" /> {{ t.responseCount }} respuesta(s)</span>
                 }
               </div>
             </div>
@@ -174,7 +176,7 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
             <div class="modal-footer">
               @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
-              <button type="submit" class="btn-primary" [disabled]="form.invalid">Enviar Ticket</button>
+              <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">Enviar Ticket</button>
             </div>
           </form>
         </div>
@@ -252,7 +254,12 @@ export class TicketsComponent {
   statusFilter = signal('');
   priorityFilter = signal('');
   showModal = signal(false);
-  selectedAttachment = signal<{ name: string; type: string; size: number; data: string } | null>(null);
+  saving = signal(false);
+  selectedAttachment = signal<File | null>(null);
+
+  constructor() {
+    loadPageData(this.notify, this.ticketService.load());
+  }
 
   fileIcon = fileIcon;
   formatFileSize = formatFileSize;
@@ -316,18 +323,11 @@ export class TicketsComponent {
     const file = input.files?.[0];
     if (!file) return;
     if (file.size > MAX_ATTACHMENT_SIZE) {
-      this.notify.error('El archivo es muy pesado (máximo 2MB).');
+      this.notify.error(`El archivo es muy pesado (máximo ${formatFileSize(MAX_ATTACHMENT_SIZE)}).`);
       input.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => this.selectedAttachment.set({
-      name: file.name,
-      type: file.name.split('.').pop()?.toLowerCase() || 'file',
-      size: file.size,
-      data: reader.result as string
-    });
-    reader.readAsDataURL(file);
+    this.selectedAttachment.set(file);
   }
 
   clearAttachment() {
@@ -340,12 +340,12 @@ export class TicketsComponent {
       { header: 'ID', value: (t: typeof rows[number]) => t.id },
       { header: 'Título', value: (t: typeof rows[number]) => t.title },
       { header: 'Empresa', value: (t: typeof rows[number]) => t.companyName },
-      { header: 'Categoría', value: (t: typeof rows[number]) => t.category },
-      { header: 'Prioridad', value: (t: typeof rows[number]) => t.priority },
+      { header: 'Categoría', value: (t: typeof rows[number]) => CATEGORY_LABELS[t.category] ?? t.category },
+      { header: 'Prioridad', value: (t: typeof rows[number]) => PRIORITY_LABELS[t.priority] ?? t.priority },
       { header: 'Estado', value: (t: typeof rows[number]) => TICKET_STATUS_LABELS[t.status] ?? t.status },
       { header: 'Creado', value: (t: typeof rows[number]) => new Date(t.createdAt).toLocaleString('es-GT') },
       { header: 'SLA límite', value: (t: typeof rows[number]) => new Date(t.slaDeadline).toLocaleString('es-GT') },
-      { header: 'Respuestas', value: (t: typeof rows[number]) => t.responses.length }
+      { header: 'Respuestas', value: (t: typeof rows[number]) => t.responseCount }
     ];
     if (format === 'excel') {
       exportToExcel('tickets', columns, rows);
@@ -354,21 +354,23 @@ export class TicketsComponent {
     }
   }
 
-  createTicket() {
+  async createTicket() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
-    const user = this.auth.currentUser()!;
-    const company = this.companyService.getById(user.companyId!);
-    const attachment = this.selectedAttachment();
-    this.ticketService.create({
-      companyId: user.companyId!,
-      companyName: company?.name || '',
-      title: this.form.value.title!,
-      description: this.form.value.description!,
-      category: this.form.value.category as any,
-      priority: this.form.value.priority as any,
-      attachments: attachment ? [{ id: 'ta' + Date.now(), ...attachment }] : []
-    });
-    this.closeModal();
-    this.notify.success(`Ticket creado correctamente. Te responderemos antes de ${this.mySlaHours()} horas.`);
+    const v = this.form.getRawValue();
+    this.saving.set(true);
+    try {
+      const ticket = await this.ticketService.create({
+        title: v.title!,
+        description: v.description!,
+        category: v.category as Ticket['category'],
+        priority: v.priority as TicketPriority,
+      }, this.selectedAttachment() ?? undefined);
+      this.closeModal();
+      this.notify.success(`Ticket creado correctamente. Te responderemos antes de ${this.ticketService.getSlaTotalHours(ticket)} horas.`);
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    } finally {
+      this.saving.set(false);
+    }
   }
 }

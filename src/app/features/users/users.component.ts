@@ -10,6 +10,7 @@ import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-tra
 import { ConfirmService } from '../../shared/services/confirm.service';
 import { NotificationService } from '../../shared/services/notification.service';
 import { isControlInvalid } from '../../shared/utils/form.util';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 
 @Component({
   selector: 'app-users',
@@ -137,7 +138,7 @@ import { isControlInvalid } from '../../shared/utils/form.util';
             <div class="modal-footer">
               @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
-              <button type="submit" class="btn-primary" [disabled]="form.invalid">
+              <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">
                 {{ editingId() ? 'Guardar cambios' : 'Crear usuario' }}
               </button>
             </div>
@@ -250,8 +251,13 @@ export class UsersComponent {
   showModal = signal(false);
   editingId = signal<string | null>(null);
   resetUserTarget = signal<User | null>(null);
+  saving = signal(false);
 
   companies = this.companyService.companies;
+
+  constructor() {
+    loadPageData(this.notify, this.userService.load(), this.companyService.load());
+  }
   clientUsers = computed(() => this.userService.users().filter(u => u.role === 'client'));
 
   form = this.fb.group({
@@ -313,22 +319,25 @@ export class UsersComponent {
     this.showModal.set(true);
   }
 
-  saveUser() {
+  async saveUser() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     const v = this.form.getRawValue();
-    if (this.editingId()) {
-      this.userService.update(this.editingId()!, {
-        name: v.name!, username: v.username!, email: v.email!, companyId: v.companyId!
-      });
-      this.notify.success('Usuario actualizado correctamente.');
-    } else {
-      this.userService.create({
-        name: v.name!, username: v.username!, email: v.email!, companyId: v.companyId!,
-        password: v.password!, role: 'client'
-      });
-      this.notify.success('Usuario creado correctamente.');
+    const data = { name: v.name!, username: v.username!, email: v.email!, companyId: v.companyId! };
+    this.saving.set(true);
+    try {
+      if (this.editingId()) {
+        await this.userService.update(this.editingId()!, data);
+        this.notify.success('Usuario actualizado correctamente.');
+      } else {
+        await this.userService.create({ ...data, password: v.password! });
+        this.notify.success('Usuario creado correctamente.');
+      }
+      this.closeModal();
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    } finally {
+      this.saving.set(false);
     }
-    this.closeModal();
   }
 
   async deleteUser(u: User) {
@@ -339,8 +348,12 @@ export class UsersComponent {
       danger: true
     });
     if (!ok) return;
-    this.userService.delete(u.id);
-    this.notify.success('Usuario eliminado correctamente.');
+    try {
+      await this.userService.delete(u.id);
+      this.notify.success('Usuario eliminado correctamente.');
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    }
   }
 
   openResetModal(u: User) {
@@ -349,12 +362,16 @@ export class UsersComponent {
   }
   closeResetModal() { this.resetUserTarget.set(null); }
 
-  confirmReset() {
+  async confirmReset() {
     if (this.resetForm.invalid) { this.resetForm.markAllAsTouched(); return; }
     const target = this.resetUserTarget();
     if (!target) return;
-    this.userService.resetPassword(target.id, this.resetForm.value.newPassword!);
-    this.notify.success(`Contraseña actualizada para ${target.name}.`);
-    this.closeResetModal();
+    try {
+      await this.userService.resetPassword(target.id, this.resetForm.value.newPassword!);
+      this.notify.success(`Contraseña actualizada para ${target.name}.`);
+      this.closeResetModal();
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    }
   }
 }

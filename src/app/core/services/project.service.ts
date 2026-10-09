@@ -1,28 +1,52 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { StorageService } from './storage.service';
-import { AuthService } from './auth.service';
-import { ActivityLogService } from './activity-log.service';
-import { Project, ProjectComment, ProjectRequirement, ProjectDocument } from '../models';
-import { MOCK_PROJECTS } from './mock-data';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { Project, ProjectPriority, ProjectStatus } from '../models';
+import { API_URL } from '../config/api.config';
+import { toProject, upper, upsert } from '../http/mappers';
+
+export interface ProjectInput {
+  name: string;
+  description: string;
+  companyId: string;
+  status: ProjectStatus;
+  priority: ProjectPriority;
+  progress: number;
+  startDate: string;
+  endDate: string;
+  budget?: number | null;
+  internalNotes?: string | null;
+  tags?: string[];
+}
+
+const toApiBody = (d: Partial<ProjectInput>) => ({
+  ...d,
+  ...(d.status && { status: upper(d.status) }),
+  ...(d.priority && { priority: upper(d.priority) }),
+});
 
 @Injectable({ providedIn: 'root' })
 export class ProjectService {
-  private storage = inject(StorageService);
-  private auth = inject(AuthService);
-  private activityLog = inject(ActivityLogService);
+  private http = inject(HttpClient);
   private _projects = signal<Project[]>([]);
   projects = this._projects.asReadonly();
 
-  constructor() {
-    if (!this.storage.get('projects')) {
-      this.storage.set('projects', MOCK_PROJECTS);
-    }
-    this._projects.set(this.storage.get<Project[]>('projects') || []);
+  async load(): Promise<void> {
+    const list = await firstValueFrom(this.http.get<any[]>(`${API_URL}/projects`));
+    // Conserva el detalle ya cargado (comentarios, documentos...) de los proyectos que no cambiaron de forma.
+    const previous = new Map(this._projects().map(p => [p.id, p]));
+    this._projects.set(list.map(raw => {
+      const fresh = toProject(raw);
+      const old = previous.get(fresh.id);
+      return old ? { ...fresh, comments: old.comments, requirements: old.requirements, documents: old.documents } : fresh;
+    }));
   }
 
-  private save(projects: Project[]) {
-    this._projects.set(projects);
-    this.storage.set('projects', projects);
+  /** Trae el proyecto completo (comentarios, requerimientos, documentos) y lo guarda en la caché. */
+  async loadDetail(id: string): Promise<Project> {
+    const p = toProject(await firstValueFrom(this.http.get<any>(`${API_URL}/projects/${id}`)));
+    this._projects.update(list => upsert(list, p));
+    return p;
   }
 
   getAll(): Project[] { return this._projects(); }
@@ -35,69 +59,41 @@ export class ProjectService {
     return this._projects().find(p => p.id === id);
   }
 
-  create(data: Omit<Project, 'id' | 'createdAt' | 'updatedAt' | 'comments' | 'requirements' | 'documents'>): Project {
-    const project: Project = {
-      ...data,
-      id: 'p' + Date.now(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      comments: [], requirements: [], documents: []
-    };
-    this.save([...this._projects(), project]);
-    this.logActivity(project.id, `creó el proyecto "${project.name}"`);
-    return project;
+  async create(data: ProjectInput): Promise<void> {
+    await firstValueFrom(this.http.post<any>(`${API_URL}/projects`, toApiBody(data)));
+    await this.load();
   }
 
-  update(id: string, data: Partial<Project>): void {
-    const updated = this._projects().map(p =>
-      p.id === id ? { ...p, ...data, updatedAt: new Date().toISOString() } : p
-    );
-    this.save(updated);
+  /** Edición desde el formulario o cambios rápidos (estado, progreso); el servidor lo registra en la bitácora. */
+  async update(id: string, data: Partial<ProjectInput>): Promise<void> {
+    await firstValueFrom(this.http.patch<any>(`${API_URL}/projects/${id}`, toApiBody(data)));
+    await this.loadDetail(id);
   }
 
-  /** Como update(), pero registra la edición en la bitácora. Úsalo para ediciones reales desde el formulario, no para sub-mutaciones internas (comentarios, requerimientos, documentos). */
-  editProject(id: string, data: Partial<Project>): void {
-    this.update(id, data);
-    const project = this.getById(id);
-    if (project) this.logActivity(id, `editó el proyecto "${project.name}"`);
+  async delete(id: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`${API_URL}/projects/${id}`));
+    this._projects.update(list => list.filter(p => p.id !== id));
   }
 
-  delete(id: string): void {
-    const project = this.getById(id);
-    this.save(this._projects().filter(p => p.id !== id));
-    if (project) this.logActivity(id, `eliminó el proyecto "${project.name}"`);
+  async addComment(projectId: string, content: string, isInternal: boolean): Promise<void> {
+    await firstValueFrom(this.http.post(`${API_URL}/projects/${projectId}/comments`, { content, isInternal }));
+    await this.loadDetail(projectId);
   }
 
-  private logActivity(entityId: string, description: string) {
-    const actor = this.auth.currentUser();
-    if (actor) this.activityLog.log(actor, 'project', entityId, description);
+  async addRequirement(projectId: string, title: string, description: string): Promise<void> {
+    await firstValueFrom(this.http.post(`${API_URL}/projects/${projectId}/requirements`, { title, description }));
+    await this.loadDetail(projectId);
   }
 
-  addComment(projectId: string, comment: Omit<ProjectComment, 'id' | 'createdAt'>): void {
-    const project = this.getById(projectId);
-    if (!project) return;
-    const newComment: ProjectComment = { ...comment, id: 'cm' + Date.now(), createdAt: new Date().toISOString() };
-    this.update(projectId, { comments: [...project.comments, newComment] });
+  async updateRequirementStatus(projectId: string, reqId: string, status: 'pending' | 'approved' | 'rejected'): Promise<void> {
+    await firstValueFrom(this.http.patch(`${API_URL}/projects/${projectId}/requirements/${reqId}`, { status: upper(status) }));
+    await this.loadDetail(projectId);
   }
 
-  addRequirement(projectId: string, req: Omit<ProjectRequirement, 'id' | 'createdAt'>): void {
-    const project = this.getById(projectId);
-    if (!project) return;
-    const newReq: ProjectRequirement = { ...req, id: 'r' + Date.now(), createdAt: new Date().toISOString() };
-    this.update(projectId, { requirements: [...project.requirements, newReq] });
-  }
-
-  updateRequirementStatus(projectId: string, reqId: string, status: 'pending' | 'approved' | 'rejected'): void {
-    const project = this.getById(projectId);
-    if (!project) return;
-    const requirements = project.requirements.map(r => r.id === reqId ? { ...r, status } : r);
-    this.update(projectId, { requirements });
-  }
-
-  addDocument(projectId: string, doc: Omit<ProjectDocument, 'id' | 'uploadedAt'>): void {
-    const project = this.getById(projectId);
-    if (!project) return;
-    const newDoc: ProjectDocument = { ...doc, id: 'd' + Date.now(), uploadedAt: new Date().toISOString() };
-    this.update(projectId, { documents: [...project.documents, newDoc] });
+  async addDocument(projectId: string, file: File): Promise<void> {
+    const form = new FormData();
+    form.append('file', file);
+    await firstValueFrom(this.http.post(`${API_URL}/projects/${projectId}/documents`, form));
+    await this.loadDetail(projectId);
   }
 }

@@ -1,6 +1,8 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { ActivityLogService } from '../../core/services/activity-log.service';
+import { NotificationService } from '../../shared/services/notification.service';
+import { loadPageData } from '../../core/http/api-error';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
 
 const ENTITY_ICON: Record<string, IconName> = {
@@ -110,6 +112,11 @@ const ENTITY_LABEL: Record<string, string> = {
 })
 export class ActivityComponent {
   private activityLog = inject(ActivityLogService);
+  private notify = inject(NotificationService);
+
+  constructor() {
+    loadPageData(this.notify, this.activityLog.load());
+  }
 
   search = signal('');
   typeFilter = signal('');

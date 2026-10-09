@@ -5,10 +5,12 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ProjectService } from '../../core/services/project.service';
 import { CompanyService } from '../../core/services/company.service';
+import { ProjectDocument, ProjectStatus } from '../../core/models';
+import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { NotificationService } from '../../shared/services/notification.service';
 import { ProjectStatusLabelPipe, PriorityLabelPipe, RequirementStatusLabelPipe } from '../../shared/pipes/labels.pipe';
-import { fileIcon, formatFileSize } from '../../shared/utils/file.util';
+import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/file.util';
 
 @Component({
   selector: 'app-project-detail',
@@ -181,13 +183,9 @@ import { fileIcon, formatFileSize } from '../../shared/utils/file.util';
                     <span class="doc-name">{{ d.name }}</span>
                     <span class="doc-meta">{{ d.uploadedBy }} · {{ d.uploadedAt | date:'dd/MM/yyyy' }} · {{ formatFileSize(d.size) }}</span>
                   </div>
-                  @if (d.data) {
-                    <button class="doc-download" (click)="downloadDoc(d)">
-                      <app-icon name="download" [size]="13" /> Descargar
-                    </button>
-                  } @else {
-                    <span class="doc-no-data">sin archivo</span>
-                  }
+                  <button class="doc-download" (click)="downloadDoc(d)">
+                    <app-icon name="download" [size]="13" /> Descargar
+                  </button>
                 </div>
               } @empty {
                 <p class="empty-msg">No hay documentos adjuntos.</p>
@@ -233,7 +231,7 @@ import { fileIcon, formatFileSize } from '../../shared/utils/file.util';
           </div>
         }
       </div>
-    } @else {
+    } @else if (loaded()) {
       <div class="not-found">
         <h2>Proyecto no encontrado</h2>
         <a routerLink="/projects"><app-icon name="chevron-left" [size]="14" /> Volver a proyectos</a>
@@ -413,8 +411,25 @@ export class ProjectDetailComponent implements OnInit {
   uploading = signal(false);
   dragOver = signal(false);
 
+  loaded = signal(false);
+
   ngOnInit() {
-    this.projectId.set(this.route.snapshot.paramMap.get('id') || '');
+    const id = this.route.snapshot.paramMap.get('id') || '';
+    this.projectId.set(id);
+    const loads: Promise<unknown>[] = [this.projectService.loadDetail(id), this.companyService.load()];
+    loadPageData(this.notify, ...loads).finally(() => this.loaded.set(true));
+  }
+
+  /** Ejecuta una acción contra la API mostrando éxito o el error que devuelva. */
+  private async run(action: Promise<unknown>, successMessage: string): Promise<boolean> {
+    try {
+      await action;
+      this.notify.success(successMessage);
+      return true;
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+      return false;
+    }
   }
 
   progressRingBackground(progress: number): string {
@@ -423,53 +438,51 @@ export class ProjectDetailComponent implements OnInit {
   }
 
   updateStatus(status: string) {
-    this.projectService.update(this.projectId(), { status: status as any });
-    this.notify.success('Estado del proyecto actualizado.');
+    this.run(this.projectService.update(this.projectId(), { status: status as ProjectStatus }), 'Estado del proyecto actualizado.');
   }
 
   updateProgress(progress: number) {
     const clamped = Math.max(0, Math.min(100, Math.round(progress)));
-    this.projectService.update(this.projectId(), { progress: clamped });
-    this.notify.success('Progreso actualizado.');
+    this.run(this.projectService.update(this.projectId(), { progress: clamped }), 'Progreso actualizado.');
   }
 
-  addComment() {
+  async addComment() {
     if (this.commentForm.invalid) { this.commentForm.markAllAsTouched(); return; }
-    const user = this.auth.currentUser()!;
-    this.projectService.addComment(this.projectId(), {
-      projectId: this.projectId(),
-      authorId: user.id,
-      authorName: user.name,
-      authorRole: user.role,
-      content: this.commentForm.value.content!,
-      isInternal: this.commentForm.value.isInternal || false
-    });
-    this.commentForm.reset({ isInternal: false });
-    this.notify.success('Comentario agregado.');
+    const { content, isInternal } = this.commentForm.value;
+    const ok = await this.run(
+      this.projectService.addComment(this.projectId(), content!, this.auth.isOwner() && !!isInternal),
+      'Comentario agregado.',
+    );
+    if (ok) this.commentForm.reset({ isInternal: false });
   }
 
-  addRequirement() {
+  async addRequirement() {
     if (this.reqForm.invalid) { this.reqForm.markAllAsTouched(); return; }
-    const user = this.auth.currentUser()!;
-    this.projectService.addRequirement(this.projectId(), {
-      projectId: this.projectId(),
-      title: this.reqForm.value.title!,
-      description: this.reqForm.value.description!,
-      status: 'pending',
-      createdBy: user.id
-    });
-    this.reqForm.reset();
-    this.notify.success('Requerimiento enviado.');
+    const { title, description } = this.reqForm.value;
+    const ok = await this.run(this.projectService.addRequirement(this.projectId(), title!, description!), 'Requerimiento enviado.');
+    if (ok) this.reqForm.reset();
   }
 
   updateReqStatus(reqId: string, status: 'approved' | 'rejected') {
-    this.projectService.updateRequirementStatus(this.projectId(), reqId, status);
-    this.notify.success(status === 'approved' ? 'Requerimiento aprobado.' : 'Requerimiento rechazado.');
+    this.run(
+      this.projectService.updateRequirementStatus(this.projectId(), reqId, status),
+      status === 'approved' ? 'Requerimiento aprobado.' : 'Requerimiento rechazado.',
+    );
+  }
+
+  private selectIfValid(file: File | undefined) {
+    if (!file) return;
+    if (file.size > MAX_DOCUMENT_SIZE) {
+      this.notify.error(`El archivo es muy pesado (máximo ${formatFileSize(MAX_DOCUMENT_SIZE)}).`);
+      return;
+    }
+    this.selectedFile.set(file);
   }
 
   onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
-    this.selectedFile.set(input.files?.[0] || null);
+    this.selectIfValid(input.files?.[0]);
+    input.value = '';
   }
 
   clearFile() {
@@ -489,42 +502,20 @@ export class ProjectDetailComponent implements OnInit {
   onDrop(event: DragEvent) {
     event.preventDefault();
     this.dragOver.set(false);
-    const file = event.dataTransfer?.files?.[0];
-    if (file) this.selectedFile.set(file);
+    this.selectIfValid(event.dataTransfer?.files?.[0]);
   }
 
-  uploadDocument() {
+  async uploadDocument() {
     const file = this.selectedFile();
     if (!file) return;
     this.uploading.set(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const user = this.auth.currentUser()!;
-      this.projectService.addDocument(this.projectId(), {
-        projectId: this.projectId(),
-        name: file.name,
-        type: file.name.split('.').pop()?.toLowerCase() || 'file',
-        size: file.size,
-        uploadedBy: user.name,
-        data: reader.result as string
-      });
-      this.selectedFile.set(null);
-      this.uploading.set(false);
-      this.notify.success('Documento subido correctamente.');
-    };
-    reader.onerror = () => {
-      this.uploading.set(false);
-      this.notify.error('No se pudo subir el documento. Intenta nuevamente.');
-    };
-    reader.readAsDataURL(file);
+    const ok = await this.run(this.projectService.addDocument(this.projectId(), file), 'Documento subido correctamente.');
+    this.uploading.set(false);
+    if (ok) this.selectedFile.set(null);
   }
 
-  downloadDoc(doc: { name: string; data?: string; type: string }) {
-    if (!doc.data) return;
-    const a = document.createElement('a');
-    a.href = doc.data;
-    a.download = doc.name;
-    a.click();
+  downloadDoc(doc: ProjectDocument) {
+    window.open(doc.url, '_blank', 'noopener');
   }
 
   fileIcon = fileIcon;
