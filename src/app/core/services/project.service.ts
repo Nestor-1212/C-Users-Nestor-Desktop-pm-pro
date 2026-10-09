@@ -1,11 +1,15 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { StorageService } from './storage.service';
+import { AuthService } from './auth.service';
+import { ActivityLogService } from './activity-log.service';
 import { Project, ProjectComment, ProjectRequirement, ProjectDocument } from '../models';
 import { MOCK_PROJECTS } from './mock-data';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectService {
   private storage = inject(StorageService);
+  private auth = inject(AuthService);
+  private activityLog = inject(ActivityLogService);
   private _projects = signal<Project[]>([]);
   projects = this._projects.asReadonly();
 
@@ -40,6 +44,7 @@ export class ProjectService {
       comments: [], requirements: [], documents: []
     };
     this.save([...this._projects(), project]);
+    this.logActivity(project.id, `creó el proyecto "${project.name}"`);
     return project;
   }
 
@@ -50,8 +55,22 @@ export class ProjectService {
     this.save(updated);
   }
 
+  /** Como update(), pero registra la edición en la bitácora. Úsalo para ediciones reales desde el formulario, no para sub-mutaciones internas (comentarios, requerimientos, documentos). */
+  editProject(id: string, data: Partial<Project>): void {
+    this.update(id, data);
+    const project = this.getById(id);
+    if (project) this.logActivity(id, `editó el proyecto "${project.name}"`);
+  }
+
   delete(id: string): void {
+    const project = this.getById(id);
     this.save(this._projects().filter(p => p.id !== id));
+    if (project) this.logActivity(id, `eliminó el proyecto "${project.name}"`);
+  }
+
+  private logActivity(entityId: string, description: string) {
+    const actor = this.auth.currentUser();
+    if (actor) this.activityLog.log(actor, 'project', entityId, description);
   }
 
   addComment(projectId: string, comment: Omit<ProjectComment, 'id' | 'createdAt'>): void {

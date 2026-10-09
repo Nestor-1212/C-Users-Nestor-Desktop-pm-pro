@@ -6,11 +6,19 @@ import { AuthService } from '../../core/services/auth.service';
 import { ProjectService } from '../../core/services/project.service';
 import { CompanyService } from '../../core/services/company.service';
 import { Project } from '../../core/models';
+import { IconComponent } from '../../shared/icon/icon.component';
+import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
+import { ConfirmService } from '../../shared/services/confirm.service';
+import { NotificationService } from '../../shared/services/notification.service';
+import { isControlInvalid } from '../../shared/utils/form.util';
+import { exportToExcel, exportToPdf } from '../../shared/utils/export.util';
+import { ProjectStatusLabelPipe, PriorityLabelPipe, PROJECT_STATUS_LABELS } from '../../shared/pipes/labels.pipe';
+import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/export-menu.component';
 
 @Component({
   selector: 'app-projects',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, IconComponent, ModalFocusTrapDirective, ProjectStatusLabelPipe, PriorityLabelPipe, ExportMenuComponent],
   template: `
     <div class="projects-page">
       <div class="page-header">
@@ -18,16 +26,26 @@ import { Project } from '../../core/models';
           <h1>{{ auth.isOwner() ? 'Todos los Proyectos' : 'Mis Proyectos' }}</h1>
           <p>{{ auth.isOwner() ? 'Gestiona y supervisa todos los proyectos de clientes' : 'Visualiza el avance de tus proyectos' }}</p>
         </div>
-        @if (auth.isOwner()) {
-          <button class="btn-primary" (click)="openModal()">+ Nuevo Proyecto</button>
-        }
+        <div class="header-actions">
+          <app-export-menu (formatSelected)="exportProjects($event)" />
+          @if (auth.isOwner()) {
+            <button class="btn-primary" (click)="openModal()">
+              <app-icon name="plus" [size]="16" /> Nuevo Proyecto
+            </button>
+          }
+        </div>
       </div>
 
       <!-- Filters -->
       <div class="filters-row">
-        <input type="text" placeholder="Buscar proyecto..." class="search-input"
-          [value]="search()" (input)="search.set($any($event.target).value)">
-        <select class="filter-select" (change)="statusFilter.set($any($event.target).value)">
+        <div class="search-wrap">
+          <app-icon name="search" [size]="16" class="search-icon" />
+          <label for="project-search" class="sr-only">Buscar proyecto</label>
+          <input id="project-search" type="text" placeholder="Buscar proyecto..." class="search-input"
+            [value]="search()" (input)="search.set($any($event.target).value)">
+        </div>
+        <label for="project-status-filter" class="sr-only">Filtrar por estado</label>
+        <select id="project-status-filter" class="filter-select" (change)="statusFilter.set($any($event.target).value)">
           <option value="">Todos los estados</option>
           <option value="planning">Planificación</option>
           <option value="in_progress">En Progreso</option>
@@ -36,7 +54,8 @@ import { Project } from '../../core/models';
           <option value="on_hold">En Espera</option>
         </select>
         @if (auth.isOwner()) {
-          <select class="filter-select" (change)="companyFilter.set($any($event.target).value)">
+          <label for="project-company-filter" class="sr-only">Filtrar por empresa</label>
+          <select id="project-company-filter" class="filter-select" (change)="companyFilter.set($any($event.target).value)">
             <option value="">Todas las empresas</option>
             @for (c of allCompanies(); track c.id) {
               <option [value]="c.id">{{ c.name }}</option>
@@ -54,16 +73,16 @@ import { Project } from '../../core/models';
               <div class="project-main">
                 <div class="project-header-row">
                   <a [routerLink]="['/projects', p.id]" class="project-title">{{ p.name }}</a>
-                  <span class="status-badge" [class]="p.status">{{ statusLabel(p.status) }}</span>
+                  <span class="status-badge" [class]="p.status">{{ p.status | projectStatusLabel }}</span>
                 </div>
                 <p class="project-desc">{{ p.description }}</p>
                 <div class="project-meta">
                   @if (auth.isOwner()) {
-                    <span class="meta-item">🏢 {{ getCompanyName(p.companyId) }}</span>
+                    <span class="meta-item"><app-icon name="building" [size]="13" /> {{ getCompanyName(p.companyId) }}</span>
                   }
-                  <span class="meta-item">📅 {{ p.startDate }} → {{ p.endDate }}</span>
-                  <span class="meta-item priority-label" [class]="p.priority">{{ priorityLabel(p.priority) }}</span>
-                  @if (p.budget) { <span class="meta-item">💰 Q{{ p.budget | number }}</span> }
+                  <span class="meta-item"><app-icon name="calendar" [size]="13" /> {{ p.startDate }} → {{ p.endDate }}</span>
+                  <span class="meta-item priority-label" [class]="p.priority">{{ p.priority | priorityLabel }}</span>
+                  @if (p.budget) { <span class="meta-item"><app-icon name="dollar-sign" [size]="13" /> Q{{ p.budget | number }}</span> }
                 </div>
                 <div class="tags-row">
                   @for (tag of p.tags || []; track tag) {
@@ -83,31 +102,37 @@ import { Project } from '../../core/models';
                 </div>
               </div>
               <div class="project-stats">
-                <div class="mini-stat">
+                <div class="mini-stat" title="Comentarios">
+                  <app-icon name="message-circle" [size]="14" />
                   <span class="mini-val">{{ p.comments.length }}</span>
-                  <span class="mini-lbl">💬</span>
                 </div>
-                <div class="mini-stat">
+                <div class="mini-stat" title="Requerimientos">
+                  <app-icon name="clipboard" [size]="14" />
                   <span class="mini-val">{{ p.requirements.length }}</span>
-                  <span class="mini-lbl">📋</span>
                 </div>
-                <div class="mini-stat">
+                <div class="mini-stat" title="Documentos">
+                  <app-icon name="paperclip" [size]="14" />
                   <span class="mini-val">{{ p.documents.length }}</span>
-                  <span class="mini-lbl">📎</span>
                 </div>
               </div>
               <div class="card-actions">
-                <a [routerLink]="['/projects', p.id]" class="btn-view">Ver detalle →</a>
+                <a [routerLink]="['/projects', p.id]" class="btn-view">
+                  Ver detalle <app-icon name="chevron-right" [size]="13" />
+                </a>
                 @if (auth.isOwner()) {
-                  <button class="btn-icon-sm" (click)="editProject(p)">✏️</button>
-                  <button class="btn-icon-sm danger" (click)="deleteProject(p.id)">🗑️</button>
+                  <button class="btn-icon-sm" (click)="editProject(p)" aria-label="Editar proyecto">
+                    <app-icon name="edit" [size]="14" />
+                  </button>
+                  <button class="btn-icon-sm danger" (click)="deleteProject(p.id, p.name)" aria-label="Eliminar proyecto">
+                    <app-icon name="trash" [size]="14" />
+                  </button>
                 }
               </div>
             </div>
           </div>
         } @empty {
           <div class="empty-state">
-            <div class="empty-icon">📁</div>
+            <div class="empty-icon"><app-icon name="folder" [size]="32" /></div>
             <h3>Sin proyectos</h3>
             <p>{{ auth.isOwner() ? 'Crea tu primer proyecto.' : 'No tienes proyectos asignados.' }}</p>
           </div>
@@ -118,33 +143,42 @@ import { Project } from '../../core/models';
     <!-- Modal -->
     @if (showModal()) {
       <div class="modal-overlay" (click)="closeModal()">
-        <div class="modal large" (click)="$event.stopPropagation()">
+        <div class="modal large" role="dialog" aria-modal="true" aria-labelledby="project-modal-title"
+          appModalFocusTrap (closeRequested)="closeModal()" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h2>{{ editingId() ? 'Editar Proyecto' : 'Nuevo Proyecto' }}</h2>
-            <button class="modal-close" (click)="closeModal()">✕</button>
+            <h2 id="project-modal-title">{{ editingId() ? 'Editar Proyecto' : 'Nuevo Proyecto' }}</h2>
+            <button class="modal-close" (click)="closeModal()" aria-label="Cerrar">
+              <app-icon name="x" [size]="18" />
+            </button>
           </div>
-          <form [formGroup]="form" (ngSubmit)="saveProject()" class="modal-body">
+          <form [formGroup]="form" (ngSubmit)="saveProject()" class="modal-body" novalidate>
             <div class="form-grid">
               <div class="form-group full">
-                <label>Nombre del proyecto *</label>
-                <input type="text" formControlName="name" placeholder="Ej: Portal E-Commerce">
+                <label for="project-name">Nombre del proyecto *</label>
+                <input id="project-name" type="text" formControlName="name" placeholder="Ej: Portal E-Commerce"
+                  [class.error]="invalid('name')" [attr.aria-invalid]="invalid('name')">
+                @if (invalid('name')) { <span class="field-error">El nombre es obligatorio.</span> }
               </div>
               <div class="form-group full">
-                <label>Descripción *</label>
-                <textarea formControlName="description" rows="3" placeholder="Describe brevemente el proyecto..."></textarea>
+                <label for="project-description">Descripción *</label>
+                <textarea id="project-description" formControlName="description" rows="3" placeholder="Describe brevemente el proyecto..."
+                  [class.error]="invalid('description')" [attr.aria-invalid]="invalid('description')"></textarea>
+                @if (invalid('description')) { <span class="field-error">La descripción es obligatoria.</span> }
               </div>
               <div class="form-group">
-                <label>Empresa cliente *</label>
-                <select formControlName="companyId">
+                <label for="project-company">Empresa cliente *</label>
+                <select id="project-company" formControlName="companyId"
+                  [class.error]="invalid('companyId')" [attr.aria-invalid]="invalid('companyId')">
                   <option value="">Selecciona empresa</option>
                   @for (c of allCompanies(); track c.id) {
                     <option [value]="c.id">{{ c.name }}</option>
                   }
                 </select>
+                @if (invalid('companyId')) { <span class="field-error">Selecciona una empresa.</span> }
               </div>
               <div class="form-group">
-                <label>Estado</label>
-                <select formControlName="status">
+                <label for="project-status">Estado</label>
+                <select id="project-status" formControlName="status">
                   <option value="planning">Planificación</option>
                   <option value="in_progress">En Progreso</option>
                   <option value="review">Revisión</option>
@@ -153,8 +187,8 @@ import { Project } from '../../core/models';
                 </select>
               </div>
               <div class="form-group">
-                <label>Prioridad</label>
-                <select formControlName="priority">
+                <label for="project-priority">Prioridad</label>
+                <select id="project-priority" formControlName="priority">
                   <option value="low">Baja</option>
                   <option value="medium">Media</option>
                   <option value="high">Alta</option>
@@ -162,27 +196,34 @@ import { Project } from '../../core/models';
                 </select>
               </div>
               <div class="form-group">
-                <label>Progreso (%)</label>
-                <input type="number" formControlName="progress" min="0" max="100">
+                <label for="project-progress">Progreso (%)</label>
+                <input id="project-progress" type="number" formControlName="progress" min="0" max="100"
+                  [class.error]="invalid('progress')" [attr.aria-invalid]="invalid('progress')">
+                @if (invalid('progress')) { <span class="field-error">Debe ser un valor entre 0 y 100.</span> }
               </div>
               <div class="form-group">
-                <label>Fecha inicio *</label>
-                <input type="date" formControlName="startDate">
+                <label for="project-start">Fecha inicio *</label>
+                <input id="project-start" type="date" formControlName="startDate"
+                  [class.error]="invalid('startDate')" [attr.aria-invalid]="invalid('startDate')">
+                @if (invalid('startDate')) { <span class="field-error">La fecha de inicio es obligatoria.</span> }
               </div>
               <div class="form-group">
-                <label>Fecha fin *</label>
-                <input type="date" formControlName="endDate">
+                <label for="project-end">Fecha fin *</label>
+                <input id="project-end" type="date" formControlName="endDate"
+                  [class.error]="invalid('endDate')" [attr.aria-invalid]="invalid('endDate')">
+                @if (invalid('endDate')) { <span class="field-error">La fecha de fin es obligatoria.</span> }
               </div>
               <div class="form-group">
-                <label>Presupuesto (Q)</label>
-                <input type="number" formControlName="budget" placeholder="0">
+                <label for="project-budget">Presupuesto (Q)</label>
+                <input id="project-budget" type="number" formControlName="budget" placeholder="0" min="0">
               </div>
               <div class="form-group full">
-                <label>Notas internas (solo visible para ti)</label>
-                <textarea formControlName="internalNotes" rows="2" placeholder="Notas privadas del proyecto..."></textarea>
+                <label for="project-notes">Notas internas (solo visible para ti)</label>
+                <textarea id="project-notes" formControlName="internalNotes" rows="2" placeholder="Notas privadas del proyecto..."></textarea>
               </div>
             </div>
             <div class="modal-footer">
+              @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
               <button type="submit" class="btn-primary" [disabled]="form.invalid">
                 {{ editingId() ? 'Guardar cambios' : 'Crear proyecto' }}
@@ -194,19 +235,13 @@ import { Project } from '../../core/models';
     }
   `,
   styles: [`
-    .projects-page { max-width: 1100px; }
-    .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-    .page-header h1 { font-size: 28px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
-    .page-header p { color: #64748b; font-size: 14px; margin: 0; }
-    .btn-primary { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; border: none; border-radius: 10px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
-    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
-    .btn-secondary { background: #f1f5f9; color: #475569; border: none; border-radius: 10px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .projects-page { max-width: 1100px; margin: 0 auto; }
+    .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-    .filters-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .search-input, .filter-select { padding: 10px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 14px; outline: none; background: white; }
-    .search-input { flex: 1; min-width: 200px; }
-    .search-input:focus, .filter-select:focus { border-color: #3b82f6; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
 
     .projects-list { display: flex; flex-direction: column; gap: 12px; }
     .project-card { background: white; border-radius: 16px; border: 1px solid #e2e8f0; padding: 20px; display: flex; gap: 20px; transition: box-shadow 0.2s; }
@@ -222,10 +257,11 @@ import { Project } from '../../core/models';
     .project-main { flex: 1; }
     .project-header-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
     .project-title { font-size: 16px; font-weight: 700; color: #0f172a; text-decoration: none; }
-    .project-title:hover { color: #3b82f6; }
+    .project-title:hover { color: var(--color-primary-700, #0f4b92); }
     .project-desc { font-size: 13px; color: #64748b; margin: 0 0 10px; line-height: 1.5; }
     .project-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-    .meta-item { font-size: 12px; color: #64748b; }
+    .meta-item { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #64748b; }
+    .meta-item app-icon { color: #94a3b8; }
     .meta-item.priority-label { font-weight: 600; }
     .meta-item.low { color: #10b981; }
     .meta-item.medium { color: #f59e0b; }
@@ -237,50 +273,38 @@ import { Project } from '../../core/models';
     .project-card-right { display: flex; flex-direction: column; gap: 12px; min-width: 160px; align-items: flex-end; }
     .progress-section { width: 100%; }
     .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-    .progress-label { font-size: 12px; color: #94a3b8; }
+    .progress-label { font-size: 12px; color: #64748b; }
     .progress-value { font-size: 13px; font-weight: 700; color: #0f172a; }
     .progress-bar { height: 6px; background: #f1f5f9; border-radius: 10px; overflow: hidden; }
     .progress-fill { height: 100%; border-radius: 10px; transition: width 0.5s; }
 
     .project-stats { display: flex; gap: 12px; }
-    .mini-stat { display: flex; align-items: center; gap: 4px; }
+    .mini-stat { display: flex; align-items: center; gap: 5px; color: #94a3b8; }
     .mini-val { font-size: 13px; font-weight: 600; color: #0f172a; }
-    .mini-lbl { font-size: 14px; }
 
     .card-actions { display: flex; align-items: center; gap: 8px; }
-    .btn-view { font-size: 13px; color: #3b82f6; font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .btn-view { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--color-primary-700, #0f4b92); font-weight: 600; text-decoration: none; white-space: nowrap; }
     .btn-view:hover { text-decoration: underline; }
-    .btn-icon-sm { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e2e8f0; background: white; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+    .btn-icon-sm { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s; }
     .btn-icon-sm:hover { background: #f8fafc; }
-    .btn-icon-sm.danger:hover { background: #fee2e2; border-color: #fca5a5; }
+    .btn-icon-sm.danger:hover { background: #fee2e2; border-color: #fca5a5; color: #dc2626; }
 
-    .status-badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-    .status-badge.planning { background: #e0e7ff; color: #4338ca; }
-    .status-badge.in_progress { background: #dbeafe; color: #1d4ed8; }
-    .status-badge.review { background: #fef3c7; color: #d97706; }
-    .status-badge.completed { background: #dcfce7; color: #16a34a; }
-    .status-badge.on_hold { background: #f1f5f9; color: #64748b; }
-
-    .empty-state { text-align: center; padding: 60px; background: white; border-radius: 16px; border: 1px solid #e2e8f0; }
-    .empty-icon { font-size: 48px; margin-bottom: 12px; }
-    .empty-state h3 { color: #0f172a; font-size: 18px; margin-bottom: 8px; }
-    .empty-state p { color: #94a3b8; }
-
-    /* Modal */
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
-    .modal { background: white; border-radius: 20px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
-    .modal.large { max-width: 700px; }
-    .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; background: white; z-index: 1; }
-    .modal-header h2 { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0; }
-    .modal-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #94a3b8; }
-    .modal-body { padding: 24px; }
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group.full { grid-column: 1/-1; }
     label { font-size: 13px; font-weight: 600; color: #374151; }
     input, select, textarea { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; resize: vertical; }
-    input:focus, select:focus, textarea:focus { border-color: #3b82f6; }
-    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 20px; border-top: 1px solid #e2e8f0; margin-top: 20px; }
+    input:focus, select:focus, textarea:focus { border-color: var(--color-primary-500, #1465c5); }
+
+    @media (max-width: 768px) {
+      .project-card { flex-direction: column; }
+      .project-card-right { align-items: stretch; min-width: 0; }
+      .card-actions { justify-content: space-between; }
+    }
+    @media (max-width: 640px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full { grid-column: auto; }
+    }
   `]
 })
 export class ProjectsComponent {
@@ -288,6 +312,8 @@ export class ProjectsComponent {
   private projectService = inject(ProjectService);
   private companyService = inject(CompanyService);
   private fb = inject(FormBuilder);
+  private confirm = inject(ConfirmService);
+  private notify = inject(NotificationService);
 
   search = signal('');
   statusFilter = signal('');
@@ -303,7 +329,7 @@ export class ProjectsComponent {
     companyId: ['', Validators.required],
     status: ['planning'],
     priority: ['medium'],
-    progress: [0],
+    progress: [0, [Validators.min(0), Validators.max(100)]],
     startDate: ['', Validators.required],
     endDate: ['', Validators.required],
     budget: [0 as number | null],
@@ -325,19 +351,35 @@ export class ProjectsComponent {
   });
 
   getCompanyName(id: string) { return this.companyService.getById(id)?.name || 'N/A'; }
-  statusLabel(s: string) {
-    const m: any = { planning: 'Planificación', in_progress: 'En Progreso', review: 'Revisión', completed: 'Completado', on_hold: 'En Espera' };
-    return m[s] || s;
+
+  exportProjects(format: ExportFormat) {
+    const rows = this.filteredProjects();
+    const columns = [
+      { header: 'Nombre', value: (p: typeof rows[number]) => p.name },
+      { header: 'Empresa', value: (p: typeof rows[number]) => this.getCompanyName(p.companyId) },
+      { header: 'Estado', value: (p: typeof rows[number]) => PROJECT_STATUS_LABELS[p.status] ?? p.status },
+      { header: 'Prioridad', value: (p: typeof rows[number]) => p.priority },
+      { header: 'Progreso (%)', value: (p: typeof rows[number]) => p.progress },
+      { header: 'Inicio', value: (p: typeof rows[number]) => p.startDate },
+      { header: 'Fin', value: (p: typeof rows[number]) => p.endDate },
+      { header: 'Presupuesto (Q)', value: (p: typeof rows[number]) => p.budget ?? 0 }
+    ];
+    if (format === 'excel') {
+      exportToExcel('proyectos', columns, rows);
+    } else {
+      exportToPdf('Reporte de Proyectos', 'proyectos', columns, rows);
+    }
   }
-  priorityLabel(p: string) {
-    const m: any = { low: '↓ Baja', medium: '→ Media', high: '↑ Alta', critical: '⚡ Crítica' };
-    return m[p] || p;
-  }
+
   progressColor(pct: number) {
     if (pct >= 80) return '#10b981';
-    if (pct >= 50) return '#3b82f6';
+    if (pct >= 50) return 'var(--color-primary-500, #1465c5)';
     if (pct >= 25) return '#f59e0b';
     return '#ef4444';
+  }
+
+  invalid(name: string): boolean {
+    return isControlInvalid(this.form.get(name));
   }
 
   openModal() { this.editingId.set(null); this.form.reset({ status: 'planning', priority: 'medium', progress: 0 }); this.showModal.set(true); }
@@ -350,18 +392,28 @@ export class ProjectsComponent {
   }
 
   saveProject() {
-    if (this.form.invalid) return;
+    if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     const v = this.form.value as any;
     v.tags = [];
     if (this.editingId()) {
-      this.projectService.update(this.editingId()!, v);
+      this.projectService.editProject(this.editingId()!, v);
+      this.notify.success('Proyecto actualizado correctamente.');
     } else {
       this.projectService.create(v);
+      this.notify.success('Proyecto creado correctamente.');
     }
     this.closeModal();
   }
 
-  deleteProject(id: string) {
-    if (confirm('¿Eliminar este proyecto?')) this.projectService.delete(id);
+  async deleteProject(id: string, name: string) {
+    const ok = await this.confirm.ask({
+      title: 'Eliminar proyecto',
+      message: `¿Eliminar "${name}"? Se perderán sus comentarios, requerimientos y documentos. Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar',
+      danger: true
+    });
+    if (!ok) return;
+    this.projectService.delete(id);
+    this.notify.success('Proyecto eliminado correctamente.');
   }
 }

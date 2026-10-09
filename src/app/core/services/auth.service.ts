@@ -16,19 +16,26 @@ export class AuthService {
   isClient = computed(() => this._currentUser()?.role === 'client');
 
   constructor() {
-    const saved = this.storageService.get<User>('current_user');
+    const saved = this.storageService.get<User>('current_user') ?? this.storageService.getSession<User>('current_user');
     if (saved) this._currentUser.set(saved);
     if (!this.storageService.get('users')) {
       this.storageService.set('users', MOCK_USERS);
     }
   }
 
-  login(username: string, password: string): boolean {
+  /** `remember` controla si la sesión sobrevive al cerrar el navegador (localStorage) o no (sessionStorage). */
+  login(username: string, password: string, remember = true): boolean {
     const users = this.storageService.get<User[]>('users') || MOCK_USERS;
     const user = users.find(u => u.username === username && u.password === password);
     if (user) {
       this._currentUser.set(user);
-      this.storageService.set('current_user', user);
+      if (remember) {
+        this.storageService.set('current_user', user);
+        this.storageService.removeSession('current_user');
+      } else {
+        this.storageService.setSession('current_user', user);
+        this.storageService.remove('current_user');
+      }
       return true;
     }
     return false;
@@ -37,6 +44,7 @@ export class AuthService {
   logout(): void {
     this._currentUser.set(null);
     this.storageService.remove('current_user');
+    this.storageService.removeSession('current_user');
     this.routerService.navigate(['/login']);
   }
 }

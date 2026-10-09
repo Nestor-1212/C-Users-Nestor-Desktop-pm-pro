@@ -5,49 +5,55 @@ import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { TicketService } from '../../core/services/ticket.service';
 import { CompanyService } from '../../core/services/company.service';
-import { Ticket } from '../../core/models';
+import { IconComponent } from '../../shared/icon/icon.component';
+import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
+import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
+import { NotificationService } from '../../shared/services/notification.service';
+import { isControlInvalid } from '../../shared/utils/form.util';
+import { fileIcon, formatFileSize, MAX_ATTACHMENT_SIZE } from '../../shared/utils/file.util';
+import { exportToExcel, exportToPdf } from '../../shared/utils/export.util';
+import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe, TICKET_STATUS_LABELS } from '../../shared/pipes/labels.pipe';
+import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/export-menu.component';
 
 @Component({
   selector: 'app-tickets',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink, DatePipe],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, DatePipe, IconComponent, StatCardComponent, ModalFocusTrapDirective, TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe, ExportMenuComponent],
   template: `
     <div class="tickets-page">
       <div class="page-header">
         <div>
           <h1>{{ auth.isOwner() ? 'Centro de Tickets' : 'Mis Tickets de Soporte' }}</h1>
-          <p>{{ auth.isOwner() ? 'Gestiona y responde solicitudes de soporte de clientes' : 'Reporta problemas y solicitudes. SLA de respuesta: 24 horas.' }}</p>
+          <p>{{ auth.isOwner() ? 'Gestiona y responde solicitudes de soporte de clientes' : 'Reporta problemas y solicitudes. SLA de respuesta: ' + mySlaHours() + ' horas.' }}</p>
         </div>
-        @if (auth.isClient()) {
-          <button class="btn-primary" (click)="openModal()">+ Nuevo Ticket</button>
-        }
+        <div class="header-actions">
+          <app-export-menu (formatSelected)="exportTickets($event)" />
+          @if (auth.isClient()) {
+            <button class="btn-primary" (click)="openModal()">
+              <app-icon name="plus" [size]="16" /> Nuevo Ticket
+            </button>
+          }
+        </div>
       </div>
 
       <!-- Stats -->
       <div class="ticket-stats">
-        <div class="ts-card yellow">
-          <span class="ts-val">{{ countByStatus('open') }}</span>
-          <span class="ts-lbl">Abiertos</span>
-        </div>
-        <div class="ts-card blue">
-          <span class="ts-val">{{ countByStatus('in_review') }}</span>
-          <span class="ts-lbl">En Revisión</span>
-        </div>
-        <div class="ts-card green">
-          <span class="ts-val">{{ countByStatus('resolved') }}</span>
-          <span class="ts-lbl">Resueltos</span>
-        </div>
-        <div class="ts-card red">
-          <span class="ts-val">{{ slaBreachedCount() }}</span>
-          <span class="ts-lbl">SLA Vencido</span>
-        </div>
+        <app-stat-card [value]="countByStatus('open')" label="Abiertos" icon="inbox" color="yellow" />
+        <app-stat-card [value]="countByStatus('in_review')" label="En Revisión" icon="search" color="blue" />
+        <app-stat-card [value]="countByStatus('resolved')" label="Resueltos" icon="check" color="green" />
+        <app-stat-card [value]="slaBreachedCount()" label="SLA Vencido" icon="alert-triangle" color="red" />
       </div>
 
       <!-- Filters -->
       <div class="filters-row">
-        <input type="text" placeholder="Buscar ticket..." class="search-input"
-          [value]="search()" (input)="search.set($any($event.target).value)">
-        <select class="filter-select" (change)="statusFilter.set($any($event.target).value)">
+        <div class="search-wrap">
+          <app-icon name="search" [size]="16" class="search-icon" />
+          <label for="ticket-search" class="sr-only">Buscar ticket</label>
+          <input id="ticket-search" type="text" placeholder="Buscar ticket..." class="search-input"
+            [value]="search()" (input)="search.set($any($event.target).value)">
+        </div>
+        <label for="ticket-status-filter" class="sr-only">Filtrar por estado</label>
+        <select id="ticket-status-filter" class="filter-select" (change)="statusFilter.set($any($event.target).value)">
           <option value="">Todos los estados</option>
           <option value="open">Abierto</option>
           <option value="in_review">En Revisión</option>
@@ -55,7 +61,8 @@ import { Ticket } from '../../core/models';
           <option value="escalated">Escalado</option>
           <option value="closed">Cerrado</option>
         </select>
-        <select class="filter-select" (change)="priorityFilter.set($any($event.target).value)">
+        <label for="ticket-priority-filter" class="sr-only">Filtrar por prioridad</label>
+        <select id="ticket-priority-filter" class="filter-select" (change)="priorityFilter.set($any($event.target).value)">
           <option value="">Todas las prioridades</option>
           <option value="low">Baja</option>
           <option value="medium">Media</option>
@@ -73,30 +80,30 @@ import { Ticket } from '../../core/models';
               <div class="ticket-top">
                 <div class="ticket-id-badge">#{{ t.id }}</div>
                 <h3 class="ticket-title">{{ t.title }}</h3>
-                <span class="status-badge" [class]="t.status">{{ ticketStatusLabel(t.status) }}</span>
-                <span class="priority-badge" [class]="t.priority">{{ priorityLabel(t.priority) }}</span>
+                <span class="status-badge" [class]="t.status">{{ t.status | ticketStatusLabel }}</span>
+                <span class="priority-badge" [class]="t.priority">{{ t.priority | priorityLabel }}</span>
                 @if (ticketService.isSlaBreached(t)) {
-                  <span class="sla-badge">⚠️ SLA Vencido</span>
+                  <span class="sla-badge"><app-icon name="alert-triangle" [size]="12" /> SLA Vencido</span>
                 }
               </div>
               <p class="ticket-desc">{{ t.description }}</p>
               <div class="ticket-meta">
                 @if (auth.isOwner()) {
-                  <span class="meta-chip company">🏢 {{ t.companyName }}</span>
+                  <span class="meta-chip company"><app-icon name="building" [size]="12" /> {{ t.companyName }}</span>
                 }
-                <span class="meta-chip">🏷️ {{ categoryLabel(t.category) }}</span>
-                <span class="meta-chip">📅 {{ t.createdAt | date:'dd/MM/yyyy HH:mm' }}</span>
-                <span class="meta-chip">⏰ SLA: {{ t.slaDeadline | date:'dd/MM/yyyy HH:mm' }}</span>
+                <span class="meta-chip"><app-icon name="tag" [size]="12" /> {{ t.category | categoryLabel }}</span>
+                <span class="meta-chip"><app-icon name="calendar" [size]="12" /> {{ t.createdAt | date:'dd/MM/yyyy HH:mm' }}</span>
+                <span class="meta-chip"><app-icon name="clock" [size]="12" /> SLA: {{ t.slaDeadline | date:'dd/MM/yyyy HH:mm' }}</span>
                 @if (t.responses.length > 0) {
-                  <span class="meta-chip responses">💬 {{ t.responses.length }} respuesta(s)</span>
+                  <span class="meta-chip responses"><app-icon name="message-circle" [size]="12" /> {{ t.responses.length }} respuesta(s)</span>
                 }
               </div>
             </div>
-            <div class="ticket-arrow">→</div>
+            <div class="ticket-arrow"><app-icon name="chevron-right" [size]="18" /></div>
           </a>
         } @empty {
           <div class="empty-state">
-            <div class="empty-icon">🎫</div>
+            <div class="empty-icon"><app-icon name="ticket" [size]="32" /></div>
             <h3>Sin tickets</h3>
             <p>{{ auth.isClient() ? 'No tienes tickets activos. ¡Todo funciona bien!' : 'No hay tickets que coincidan con los filtros.' }}</p>
           </div>
@@ -107,46 +114,65 @@ import { Ticket } from '../../core/models';
     <!-- New Ticket Modal -->
     @if (showModal()) {
       <div class="modal-overlay" (click)="closeModal()">
-        <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ticket-modal-title"
+          appModalFocusTrap (closeRequested)="closeModal()" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h2>Nuevo Ticket de Soporte</h2>
-            <button class="modal-close" (click)="closeModal()">✕</button>
+            <h2 id="ticket-modal-title">Nuevo Ticket de Soporte</h2>
+            <button class="modal-close" (click)="closeModal()" aria-label="Cerrar">
+              <app-icon name="x" [size]="18" />
+            </button>
           </div>
-          <form [formGroup]="form" (ngSubmit)="createTicket()" class="modal-body">
+          <form [formGroup]="form" (ngSubmit)="createTicket()" class="modal-body" novalidate>
             <div class="form-group">
-              <label>Título del problema *</label>
-              <input type="text" formControlName="title" placeholder="Describe brevemente el problema">
+              <label for="ticket-title">Título del problema *</label>
+              <input id="ticket-title" type="text" formControlName="title" placeholder="Describe brevemente el problema"
+                [class.error]="invalid('title')" [attr.aria-invalid]="invalid('title')">
+              @if (invalid('title')) { <span class="field-error">El título es obligatorio.</span> }
             </div>
             <div class="form-group">
-              <label>Descripción detallada *</label>
-              <textarea formControlName="description" rows="4" placeholder="Explica el problema en detalle, pasos para reproducirlo, etc."></textarea>
+              <label for="ticket-description">Descripción detallada *</label>
+              <textarea id="ticket-description" formControlName="description" rows="4" placeholder="Explica el problema en detalle, pasos para reproducirlo, etc."
+                [class.error]="invalid('description')" [attr.aria-invalid]="invalid('description')"></textarea>
+              @if (invalid('description')) { <span class="field-error">La descripción es obligatoria.</span> }
             </div>
             <div class="form-grid-2">
               <div class="form-group">
-                <label>Categoría</label>
-                <select formControlName="category">
-                  <option value="bug">🐛 Error / Bug</option>
-                  <option value="feature">✨ Nueva funcionalidad</option>
-                  <option value="support">❓ Soporte técnico</option>
-                  <option value="billing">💰 Facturación</option>
-                  <option value="other">📌 Otro</option>
+                <label for="ticket-category">Categoría</label>
+                <select id="ticket-category" formControlName="category">
+                  <option value="bug">Error / Bug</option>
+                  <option value="feature">Nueva funcionalidad</option>
+                  <option value="support">Soporte técnico</option>
+                  <option value="billing">Facturación</option>
+                  <option value="other">Otro</option>
                 </select>
               </div>
               <div class="form-group">
-                <label>Prioridad</label>
-                <select formControlName="priority">
-                  <option value="low">🟢 Baja</option>
-                  <option value="medium">🟡 Media</option>
-                  <option value="high">🟠 Alta</option>
-                  <option value="critical">🔴 Crítica</option>
+                <label for="ticket-priority">Prioridad</label>
+                <select id="ticket-priority" formControlName="priority">
+                  <option value="low">Baja</option>
+                  <option value="medium">Media</option>
+                  <option value="high">Alta</option>
+                  <option value="critical">Crítica</option>
                 </select>
               </div>
             </div>
+            <div class="form-group">
+              <label for="ticket-attachment">Adjuntar archivo (opcional)</label>
+              <input id="ticket-attachment" type="file" accept="image/*,.pdf" (change)="onAttachmentSelected($event)">
+              @if (selectedAttachment()) {
+                <div class="attachment-chip">
+                  <app-icon [name]="fileIcon(selectedAttachment()!.name.split('.').pop() || '')" [size]="14" />
+                  <span>{{ selectedAttachment()!.name }} · {{ formatFileSize(selectedAttachment()!.size) }}</span>
+                  <button type="button" (click)="clearAttachment()" aria-label="Quitar adjunto"><app-icon name="x" [size]="13" /></button>
+                </div>
+              }
+            </div>
             <div class="sla-info">
-              <span>⏰</span>
-              <span>Tiempo de respuesta garantizado: <strong>24 horas</strong> desde la creación.</span>
+              <app-icon name="clock" [size]="16" />
+              <span>Tiempo de respuesta garantizado: <strong>{{ mySlaHours() }} horas</strong> desde la creación (plan {{ myPlan() }}).</span>
             </div>
             <div class="modal-footer">
+              @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
               <button type="submit" class="btn-primary" [disabled]="form.invalid">Enviar Ticket</button>
             </div>
@@ -156,28 +182,15 @@ import { Ticket } from '../../core/models';
     }
   `,
   styles: [`
-    .tickets-page { max-width: 1000px; }
-    .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-    .page-header h1 { font-size: 28px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
-    .page-header p { color: #64748b; font-size: 14px; margin: 0; }
-    .btn-primary { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; border: none; border-radius: 10px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
-    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
-    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
-    .btn-secondary { background: #f1f5f9; color: #475569; border: none; border-radius: 10px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .tickets-page { max-width: 1000px; margin: 0 auto; }
+    .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-    .ticket-stats { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
-    .ts-card { background: white; border-radius: 12px; padding: 16px 24px; border: 1px solid #e2e8f0; text-align: center; min-width: 90px; border-top: 3px solid; }
-    .ts-card.yellow { border-top-color: #f59e0b; }
-    .ts-card.blue { border-top-color: #3b82f6; }
-    .ts-card.green { border-top-color: #10b981; }
-    .ts-card.red { border-top-color: #ef4444; }
-    .ts-val { display: block; font-size: 28px; font-weight: 800; color: #0f172a; }
-    .ts-lbl { font-size: 12px; color: #94a3b8; font-weight: 500; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
 
-    .filters-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .search-input, .filter-select { padding: 10px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 14px; outline: none; background: white; }
-    .search-input { flex: 1; min-width: 200px; }
-    .search-input:focus, .filter-select:focus { border-color: #3b82f6; }
+    .ticket-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-bottom: 20px; }
 
     .tickets-list { display: flex; flex-direction: column; gap: 10px; }
     .ticket-card {
@@ -198,46 +211,34 @@ import { Ticket } from '../../core/models';
     .ticket-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
     .ticket-id-badge { background: #f1f5f9; color: #64748b; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: monospace; }
     .ticket-title { font-size: 15px; font-weight: 700; color: #0f172a; flex: 1; margin: 0; }
-    .sla-badge { background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    .sla-badge { display: inline-flex; align-items: center; gap: 4px; background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
     .ticket-desc { font-size: 13px; color: #64748b; margin: 0 0 10px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .ticket-meta { display: flex; gap: 10px; flex-wrap: wrap; }
-    .meta-chip { font-size: 12px; color: #64748b; background: #f8fafc; padding: 3px 8px; border-radius: 6px; }
+    .meta-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #64748b; background: #f8fafc; padding: 3px 8px; border-radius: 6px; }
     .meta-chip.company { background: #eff6ff; color: #1d4ed8; }
     .meta-chip.responses { background: #f0fdf4; color: #16a34a; }
 
-    .ticket-arrow { display: flex; align-items: center; padding: 0 16px; color: #cbd5e1; font-size: 18px; }
+    .ticket-arrow { display: flex; align-items: center; padding: 0 16px; color: #cbd5e1; }
 
-    .status-badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-    .status-badge.open { background: #fef3c7; color: #d97706; }
-    .status-badge.in_review { background: #dbeafe; color: #1d4ed8; }
-    .status-badge.resolved { background: #dcfce7; color: #16a34a; }
-    .status-badge.escalated { background: #fee2e2; color: #dc2626; }
-    .status-badge.closed { background: #f1f5f9; color: #64748b; }
-    .priority-badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-    .priority-badge.low { background: #dcfce7; color: #16a34a; }
-    .priority-badge.medium { background: #fef3c7; color: #d97706; }
-    .priority-badge.high { background: #fed7aa; color: #ea580c; }
-    .priority-badge.critical { background: #fee2e2; color: #dc2626; }
-
-    .empty-state { text-align: center; padding: 60px; background: white; border-radius: 16px; border: 1px solid #e2e8f0; }
-    .empty-icon { font-size: 48px; margin-bottom: 12px; }
-    .empty-state h3 { color: #0f172a; font-size: 18px; margin-bottom: 8px; }
-    .empty-state p { color: #94a3b8; }
-
-    /* Modal */
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
-    .modal { background: white; border-radius: 20px; width: 100%; max-width: 560px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
-    .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid #e2e8f0; }
-    .modal-header h2 { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0; }
-    .modal-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #94a3b8; }
-    .modal-body { padding: 24px; }
     .form-group { margin-bottom: 16px; }
     .form-group label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
     .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box; font-family: inherit; resize: vertical; }
-    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #3b82f6; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--color-primary-500, #1465c5); }
     .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .sla-info { display: flex; gap: 8px; align-items: center; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 10px 14px; font-size: 13px; color: #1d4ed8; margin-top: 4px; }
-    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 20px; border-top: 1px solid #e2e8f0; margin-top: 16px; }
+
+    .attachment-chip {
+      display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+      background: var(--color-neutral-bg, #f1f5f9); border-radius: 8px; padding: 6px 10px;
+      font-size: 12.5px; color: #475569;
+    }
+    .attachment-chip button { background: none; border: none; cursor: pointer; color: #94a3b8; display: flex; margin-left: 4px; }
+    .attachment-chip button:hover { color: #dc2626; }
+
+    @media (max-width: 640px) {
+      .form-grid-2 { grid-template-columns: 1fr; }
+      .ticket-arrow { padding: 0 10px; }
+    }
   `]
 })
 export class TicketsComponent {
@@ -245,17 +246,32 @@ export class TicketsComponent {
   ticketService = inject(TicketService);
   private companyService = inject(CompanyService);
   private fb = inject(FormBuilder);
+  private notify = inject(NotificationService);
 
   search = signal('');
   statusFilter = signal('');
   priorityFilter = signal('');
   showModal = signal(false);
+  selectedAttachment = signal<{ name: string; type: string; size: number; data: string } | null>(null);
+
+  fileIcon = fileIcon;
+  formatFileSize = formatFileSize;
 
   form = this.fb.group({
     title: ['', Validators.required],
     description: ['', Validators.required],
     category: ['bug'],
     priority: ['medium']
+  });
+
+  myCompany = computed(() => {
+    const user = this.auth.currentUser();
+    return user?.companyId ? this.companyService.getById(user.companyId) : undefined;
+  });
+  myPlan = computed(() => this.myCompany()?.plan || 'Standard');
+  mySlaHours = computed(() => {
+    const user = this.auth.currentUser();
+    return user?.companyId ? this.ticketService.getSlaHoursForCompany(user.companyId) : 24;
   });
 
   filteredTickets = computed(() => {
@@ -288,34 +304,71 @@ export class TicketsComponent {
     return list.filter(t => this.ticketService.isSlaBreached(t)).length;
   }
 
-  openModal() { this.form.reset({ category: 'bug', priority: 'medium' }); this.showModal.set(true); }
+  invalid(name: string): boolean {
+    return isControlInvalid(this.form.get(name));
+  }
+
+  openModal() { this.form.reset({ category: 'bug', priority: 'medium' }); this.selectedAttachment.set(null); this.showModal.set(true); }
   closeModal() { this.showModal.set(false); }
 
+  onAttachmentSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      this.notify.error('El archivo es muy pesado (máximo 2MB).');
+      input.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => this.selectedAttachment.set({
+      name: file.name,
+      type: file.name.split('.').pop()?.toLowerCase() || 'file',
+      size: file.size,
+      data: reader.result as string
+    });
+    reader.readAsDataURL(file);
+  }
+
+  clearAttachment() {
+    this.selectedAttachment.set(null);
+  }
+
+  exportTickets(format: ExportFormat) {
+    const rows = this.filteredTickets();
+    const columns = [
+      { header: 'ID', value: (t: typeof rows[number]) => t.id },
+      { header: 'Título', value: (t: typeof rows[number]) => t.title },
+      { header: 'Empresa', value: (t: typeof rows[number]) => t.companyName },
+      { header: 'Categoría', value: (t: typeof rows[number]) => t.category },
+      { header: 'Prioridad', value: (t: typeof rows[number]) => t.priority },
+      { header: 'Estado', value: (t: typeof rows[number]) => TICKET_STATUS_LABELS[t.status] ?? t.status },
+      { header: 'Creado', value: (t: typeof rows[number]) => new Date(t.createdAt).toLocaleString('es-GT') },
+      { header: 'SLA límite', value: (t: typeof rows[number]) => new Date(t.slaDeadline).toLocaleString('es-GT') },
+      { header: 'Respuestas', value: (t: typeof rows[number]) => t.responses.length }
+    ];
+    if (format === 'excel') {
+      exportToExcel('tickets', columns, rows);
+    } else {
+      exportToPdf('Reporte de Tickets', 'tickets', columns, rows);
+    }
+  }
+
   createTicket() {
-    if (this.form.invalid) return;
+    if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     const user = this.auth.currentUser()!;
     const company = this.companyService.getById(user.companyId!);
+    const attachment = this.selectedAttachment();
     this.ticketService.create({
       companyId: user.companyId!,
       companyName: company?.name || '',
       title: this.form.value.title!,
       description: this.form.value.description!,
       category: this.form.value.category as any,
-      priority: this.form.value.priority as any
+      priority: this.form.value.priority as any,
+      attachments: attachment ? [{ id: 'ta' + Date.now(), ...attachment }] : []
     });
     this.closeModal();
-  }
-
-  ticketStatusLabel(s: string) {
-    const m: any = { open: 'Abierto', in_review: 'En Revisión', resolved: 'Resuelto', escalated: 'Escalado', closed: 'Cerrado' };
-    return m[s] || s;
-  }
-  priorityLabel(p: string) {
-    const m: any = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' };
-    return m[p] || p;
-  }
-  categoryLabel(c: string) {
-    const m: any = { bug: 'Bug', feature: 'Funcionalidad', support: 'Soporte', billing: 'Facturación', other: 'Otro' };
-    return m[c] || c;
+    this.notify.success(`Ticket creado correctamente. Te responderemos antes de ${this.mySlaHours()} horas.`);
   }
 }

@@ -5,68 +5,46 @@ import { AuthService } from '../../core/services/auth.service';
 import { CompanyService } from '../../core/services/company.service';
 import { ProjectService } from '../../core/services/project.service';
 import { TicketService } from '../../core/services/ticket.service';
+import { ActivityLogService } from '../../core/services/activity-log.service';
+import { InvoiceService } from '../../core/services/invoice.service';
 import { Project, Ticket } from '../../core/models';
+import { IconComponent } from '../../shared/icon/icon.component';
+import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
+import { ProjectStatusLabelPipe, TicketStatusLabelPipe, PriorityLabelPipe } from '../../shared/pipes/labels.pipe';
+import { projectStatusColor } from '../../shared/utils/status-colors';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, IconComponent, StatCardComponent, ProjectStatusLabelPipe, TicketStatusLabelPipe, PriorityLabelPipe],
   template: `
     <div class="dashboard">
       <!-- Header -->
-      <div class="page-header">
-        <div>
-          <h1>Dashboard</h1>
-          <p>{{ auth.isOwner() ? 'Panel de administración del sistema' : 'Panel de tu empresa' }}</p>
+      <div class="page-header dash-header">
+        <div class="dash-header-main">
+          @if (auth.isClient() && myCompanyLogo()) {
+            <img class="company-logo-badge" [src]="myCompanyLogo()!" alt="Logo de tu empresa">
+          }
+          <div>
+            <span class="eyebrow">{{ greeting() }}{{ firstName() ? ', ' + firstName() : '' }}</span>
+            <h1>Dashboard</h1>
+            <p>{{ auth.isOwner() ? 'Panel de administración del sistema' : 'Panel de tu empresa' }}</p>
+          </div>
         </div>
-        <span class="date-badge">{{ today }}</span>
+        <span class="date-badge"><app-icon name="calendar" [size]="14" /> {{ today }}</span>
       </div>
 
       <!-- Owner Stats -->
       @if (auth.isOwner()) {
         <div class="stats-grid">
-          <div class="stat-card blue">
-            <div class="stat-icon">🏢</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ stats().totalCompanies }}</span>
-              <span class="stat-label">Empresas Activas</span>
-            </div>
-          </div>
-          <div class="stat-card indigo">
-            <div class="stat-icon">📁</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ stats().totalProjects }}</span>
-              <span class="stat-label">Total Proyectos</span>
-            </div>
-          </div>
-          <div class="stat-card green">
-            <div class="stat-icon">✅</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ stats().completedProjects }}</span>
-              <span class="stat-label">Completados</span>
-            </div>
-          </div>
-          <div class="stat-card yellow">
-            <div class="stat-icon">⚙️</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ stats().inProgressProjects }}</span>
-              <span class="stat-label">En Progreso</span>
-            </div>
-          </div>
-          <div class="stat-card red">
-            <div class="stat-icon">🎫</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ stats().openTickets }}</span>
-              <span class="stat-label">Tickets Abiertos</span>
-            </div>
-          </div>
-          <div class="stat-card orange">
-            <div class="stat-icon">⚠️</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ stats().slaBreached }}</span>
-              <span class="stat-label">SLA Vencidos</span>
-            </div>
-          </div>
+          <app-stat-card [value]="stats().totalCompanies" label="Empresas Activas" icon="building" color="blue" />
+          <app-stat-card [value]="stats().totalProjects" label="Total Proyectos" icon="folder" color="indigo" />
+          <app-stat-card [value]="stats().completedProjects" label="Completados" icon="check" color="green" />
+          <app-stat-card [value]="stats().inProgressProjects" label="En Progreso" icon="settings" color="yellow" />
+          <app-stat-card [value]="stats().openTickets" label="Tickets Abiertos" icon="ticket" color="red" />
+          <app-stat-card [value]="stats().slaBreached" label="SLA Vencidos" icon="alert-triangle" color="orange" />
+          <app-stat-card [value]="stats().avgSatisfaction !== null ? (stats().avgSatisfaction + '/5') : 'Sin datos'" label="Satisfacción" icon="star" color="yellow" />
+          <app-stat-card [value]="'Q' + stats().pendingBilling.toLocaleString('es-GT')" label="Facturación Pendiente" icon="dollar-sign" color="red" />
         </div>
 
         <!-- Charts + Recent -->
@@ -76,19 +54,22 @@ import { Project, Ticket } from '../../core/models';
             <div class="card-header">
               <h3>Proyectos por Estado</h3>
             </div>
-            <div class="status-bars">
-              @for (item of projectsByStatus(); track item.label) {
-                <div class="status-bar-item">
-                  <div class="status-bar-label">
-                    <span class="dot" [style.background]="item.color"></span>
-                    <span>{{ item.label }}</span>
-                    <span class="count">{{ item.count }}</span>
-                  </div>
-                  <div class="bar-track">
-                    <div class="bar-fill" [style.width.%]="item.pct" [style.background]="item.color"></div>
-                  </div>
+            <div class="donut-layout">
+              <div class="donut-chart" [style.background]="projectsByStatusChart().gradient">
+                <div class="donut-hole">
+                  <span class="donut-total">{{ projectsByStatusChart().total }}</span>
+                  <span class="donut-label">Proyectos</span>
                 </div>
-              }
+              </div>
+              <div class="donut-legend">
+                @for (item of projectsByStatus(); track item.label) {
+                  <div class="legend-row">
+                    <span class="dot" [style.background]="item.color"></span>
+                    <span class="legend-label">{{ item.label }}</span>
+                    <span class="legend-count">{{ item.count }}</span>
+                  </div>
+                }
+              </div>
             </div>
           </div>
 
@@ -96,7 +77,7 @@ import { Project, Ticket } from '../../core/models';
           <div class="card">
             <div class="card-header">
               <h3>Resumen por Empresa</h3>
-              <a routerLink="/companies" class="see-all">Ver todo →</a>
+              <a routerLink="/companies" class="see-all">Ver todo <app-icon name="chevron-right" [size]="14" /></a>
             </div>
             <div class="company-list">
               @for (item of companySummary(); track item.id) {
@@ -106,7 +87,7 @@ import { Project, Ticket } from '../../core/models';
                     <span class="company-name">{{ item.name }}</span>
                     <span class="company-sub">{{ item.projectCount }} proyectos · {{ item.plan }}</span>
                   </div>
-                  <span class="badge-status" [class]="item.status">{{ item.status === 'active' ? 'Activa' : 'Inactiva' }}</span>
+                  <span class="status-badge" [class]="item.status">{{ item.status === 'active' ? 'Activa' : 'Inactiva' }}</span>
                 </div>
               }
             </div>
@@ -118,7 +99,7 @@ import { Project, Ticket } from '../../core/models';
           <div class="card">
             <div class="card-header">
               <h3>Proyectos Recientes</h3>
-              <a routerLink="/projects" class="see-all">Ver todo →</a>
+              <a routerLink="/projects" class="see-all">Ver todo <app-icon name="chevron-right" [size]="14" /></a>
             </div>
             <div class="project-list">
               @for (p of recentProjects(); track p.id) {
@@ -132,7 +113,7 @@ import { Project, Ticket } from '../../core/models';
                       <div class="progress-fill" [style.width.%]="p.progress"></div>
                     </div>
                     <span class="progress-pct">{{ p.progress }}%</span>
-                    <span class="status-badge" [class]="p.status">{{ statusLabel(p.status) }}</span>
+                    <span class="status-badge" [class]="p.status">{{ p.status | projectStatusLabel }}</span>
                   </div>
                 </a>
               }
@@ -142,20 +123,39 @@ import { Project, Ticket } from '../../core/models';
           <div class="card">
             <div class="card-header">
               <h3>Tickets Recientes</h3>
-              <a routerLink="/tickets" class="see-all">Ver todo →</a>
+              <a routerLink="/tickets" class="see-all">Ver todo <app-icon name="chevron-right" [size]="14" /></a>
             </div>
             <div class="ticket-list">
               @for (t of recentTickets(); track t.id) {
                 <a [routerLink]="['/tickets', t.id]" class="ticket-row">
-                  <div class="ticket-icon" [class]="t.priority">{{ priorityIcon(t.priority) }}</div>
+                  <span class="priority-dot" [class]="t.priority" [title]="t.priority | priorityLabel:true"></span>
                   <div class="ticket-info">
                     <span class="ticket-title">{{ t.title }}</span>
                     <span class="ticket-company">{{ t.companyName }}</span>
                   </div>
-                  <span class="status-badge" [class]="t.status">{{ ticketStatusLabel(t.status) }}</span>
+                  <span class="status-badge" [class]="t.status">{{ t.status | ticketStatusLabel }}</span>
                 </a>
               }
             </div>
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="card">
+          <div class="card-header">
+            <h3>Actividad Reciente</h3>
+            <a routerLink="/activity" class="see-all">Ver todo <app-icon name="chevron-right" [size]="14" /></a>
+          </div>
+          <div class="activity-feed">
+            @for (e of recentActivity(); track e.id) {
+              <div class="activity-feed-row">
+                <span class="activity-dot"></span>
+                <p class="activity-feed-text"><strong>{{ e.actorName }}</strong> {{ e.description }}</p>
+                <span class="activity-feed-date">{{ e.createdAt | date:'dd/MM HH:mm' }}</span>
+              </div>
+            } @empty {
+              <p class="activity-feed-empty">Sin actividad reciente.</p>
+            }
           </div>
         </div>
       }
@@ -163,41 +163,17 @@ import { Project, Ticket } from '../../core/models';
       <!-- Client Dashboard -->
       @if (auth.isClient()) {
         <div class="stats-grid">
-          <div class="stat-card blue">
-            <div class="stat-icon">📁</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ clientStats().totalProjects }}</span>
-              <span class="stat-label">Mis Proyectos</span>
-            </div>
-          </div>
-          <div class="stat-card green">
-            <div class="stat-icon">✅</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ clientStats().completed }}</span>
-              <span class="stat-label">Completados</span>
-            </div>
-          </div>
-          <div class="stat-card yellow">
-            <div class="stat-icon">⚙️</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ clientStats().inProgress }}</span>
-              <span class="stat-label">En Progreso</span>
-            </div>
-          </div>
-          <div class="stat-card red">
-            <div class="stat-icon">🎫</div>
-            <div class="stat-info">
-              <span class="stat-value">{{ clientStats().openTickets }}</span>
-              <span class="stat-label">Tickets Abiertos</span>
-            </div>
-          </div>
+          <app-stat-card [value]="clientStats().totalProjects" label="Mis Proyectos" icon="folder" color="blue" />
+          <app-stat-card [value]="clientStats().completed" label="Completados" icon="check" color="green" />
+          <app-stat-card [value]="clientStats().inProgress" label="En Progreso" icon="settings" color="yellow" />
+          <app-stat-card [value]="clientStats().openTickets" label="Tickets Abiertos" icon="ticket" color="red" />
         </div>
 
         <div class="content-grid">
           <div class="card full-width">
             <div class="card-header">
               <h3>Mis Proyectos</h3>
-              <a routerLink="/projects" class="see-all">Ver todo →</a>
+              <a routerLink="/projects" class="see-all">Ver todo <app-icon name="chevron-right" [size]="14" /></a>
             </div>
             <div class="project-list">
               @for (p of clientProjects(); track p.id) {
@@ -211,11 +187,15 @@ import { Project, Ticket } from '../../core/models';
                       <div class="progress-fill" [style.width.%]="p.progress"></div>
                     </div>
                     <span class="progress-pct">{{ p.progress }}%</span>
-                    <span class="status-badge" [class]="p.status">{{ statusLabel(p.status) }}</span>
+                    <span class="status-badge" [class]="p.status">{{ p.status | projectStatusLabel }}</span>
                   </div>
                 </a>
               } @empty {
-                <p class="empty-msg">No tienes proyectos asignados todavía.</p>
+                <div class="empty-state">
+                  <div class="empty-icon"><app-icon name="folder" [size]="32" /></div>
+                  <h3>Sin proyectos</h3>
+                  <p>No tienes proyectos asignados todavía.</p>
+                </div>
               }
             </div>
           </div>
@@ -225,20 +205,24 @@ import { Project, Ticket } from '../../core/models';
           <div class="card full-width">
             <div class="card-header">
               <h3>Mis Tickets Recientes</h3>
-              <a routerLink="/tickets" class="see-all">Ver todo →</a>
+              <a routerLink="/tickets" class="see-all">Ver todo <app-icon name="chevron-right" [size]="14" /></a>
             </div>
             <div class="ticket-list">
               @for (t of clientTickets(); track t.id) {
                 <a [routerLink]="['/tickets', t.id]" class="ticket-row">
-                  <div class="ticket-icon" [class]="t.priority">{{ priorityIcon(t.priority) }}</div>
+                  <span class="priority-dot" [class]="t.priority" [title]="t.priority | priorityLabel:true"></span>
                   <div class="ticket-info">
                     <span class="ticket-title">{{ t.title }}</span>
                     <span class="ticket-company">{{ t.createdAt | date:'dd/MM/yyyy HH:mm' }}</span>
                   </div>
-                  <span class="status-badge" [class]="t.status">{{ ticketStatusLabel(t.status) }}</span>
+                  <span class="status-badge" [class]="t.status">{{ t.status | ticketStatusLabel }}</span>
                 </a>
               } @empty {
-                <p class="empty-msg">No tienes tickets. <a routerLink="/tickets">Crear uno</a></p>
+                <div class="empty-state">
+                  <div class="empty-icon"><app-icon name="ticket" [size]="32" /></div>
+                  <h3>Sin tickets</h3>
+                  <p>No tienes tickets. <a routerLink="/tickets">Crear uno</a></p>
+                </div>
               }
             </div>
           </div>
@@ -247,105 +231,121 @@ import { Project, Ticket } from '../../core/models';
     </div>
   `,
   styles: [`
-    .dashboard { max-width: 1200px; }
-    .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; }
-    .page-header h1 { font-size: 28px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
-    .page-header p { color: #64748b; font-size: 14px; margin: 0; }
-    .date-badge { background: #e0e7ff; color: #4338ca; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+    .dashboard { max-width: 1200px; margin: 0 auto; }
 
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
-    .stat-card {
-      background: white; border-radius: 16px; padding: 20px;
-      display: flex; align-items: center; gap: 14px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #f1f5f9;
+    .dash-header-main { display: flex; align-items: center; gap: 14px; }
+    .company-logo-badge {
+      width: 48px; height: 48px; border-radius: 12px; object-fit: contain;
+      background: #fff; border: 1px solid var(--color-border, #e2e8f0); padding: 5px; box-sizing: border-box;
+      box-shadow: var(--shadow-card, 0 1px 3px rgba(0,0,0,0.06)); flex-shrink: 0;
     }
-    .stat-icon { font-size: 28px; }
-    .stat-value { font-size: 28px; font-weight: 800; display: block; line-height: 1; }
-    .stat-label { font-size: 12px; color: #64748b; font-weight: 500; display: block; margin-top: 4px; }
-    .stat-card.blue .stat-value { color: #1e40af; }
-    .stat-card.indigo .stat-value { color: #4338ca; }
-    .stat-card.green .stat-value { color: #059669; }
-    .stat-card.yellow .stat-value { color: #d97706; }
-    .stat-card.red .stat-value { color: #dc2626; }
-    .stat-card.orange .stat-value { color: #ea580c; }
+    .dash-header .eyebrow {
+      display: inline-flex; align-items: center; font-size: 13px; font-weight: 600;
+      color: var(--color-primary-700, #0f4b92); background: var(--color-primary-50, #e8f1fd);
+      padding: 4px 12px; border-radius: 20px; margin-bottom: 10px;
+    }
+    .date-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #fff; color: #334155; padding: 8px 16px; border-radius: 20px;
+      font-size: 13px; font-weight: 600; white-space: nowrap; text-transform: capitalize;
+      border: 1px solid var(--color-border, #e2e8f0); box-shadow: var(--shadow-card, 0 1px 3px rgba(0,0,0,0.06));
+    }
 
-    .content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-    .card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #f1f5f9; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; align-items: stretch; }
+    .stats-grid app-stat-card { display: block; animation: fade-up 0.4s ease both; }
+    .stats-grid app-stat-card:nth-child(1) { animation-delay: 0s; }
+    .stats-grid app-stat-card:nth-child(2) { animation-delay: .04s; }
+    .stats-grid app-stat-card:nth-child(3) { animation-delay: .08s; }
+    .stats-grid app-stat-card:nth-child(4) { animation-delay: .12s; }
+    .stats-grid app-stat-card:nth-child(5) { animation-delay: .16s; }
+    .stats-grid app-stat-card:nth-child(6) { animation-delay: .2s; }
+    @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) {
+      .stats-grid app-stat-card { animation: none; }
+    }
+
+    .content-grid { display: grid; grid-template-columns: 1fr 1.3fr; gap: 20px; margin-bottom: 20px; }
+    .card { background: white; border-radius: 16px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #f1f5f9; transition: box-shadow 0.25s; }
+    .card:hover { box-shadow: var(--shadow-card-hover, 0 8px 24px rgba(0,0,0,0.08)); }
     .card.full-width { grid-column: 1 / -1; }
     .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
     .card-header h3 { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0; }
-    .see-all { font-size: 13px; color: #3b82f6; text-decoration: none; font-weight: 500; }
+    .see-all { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--color-primary-700, #0f4b92); text-decoration: none; font-weight: 500; }
     .see-all:hover { text-decoration: underline; }
 
-    /* Status bars */
-    .status-bars { display: flex; flex-direction: column; gap: 12px; }
-    .status-bar-item {}
-    .status-bar-label { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 13px; color: #374151; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .count { margin-left: auto; font-weight: 700; color: #0f172a; }
-    .bar-track { height: 6px; background: #f1f5f9; border-radius: 10px; overflow: hidden; }
-    .bar-fill { height: 100%; border-radius: 10px; transition: width 0.5s; }
+    /* Donut chart (distribución de proyectos por estado) */
+    .donut-layout { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+    .donut-chart {
+      position: relative; width: 148px; height: 148px; border-radius: 50%; flex-shrink: 0;
+      transition: background 0.4s;
+    }
+    .donut-hole {
+      position: absolute; inset: 18px; border-radius: 50%; background: var(--color-surface, #fff);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      box-shadow: inset 0 0 0 1px rgba(15,23,42,0.05);
+    }
+    .donut-total { font-size: 24px; font-weight: 800; color: #0f172a; line-height: 1; }
+    .donut-label { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .donut-legend { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 10px; }
+    .legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #374151; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .legend-label { flex: 1; }
+    .legend-count { font-weight: 700; color: #0f172a; }
+    @media (max-width: 480px) { .donut-layout { justify-content: center; } }
 
     /* Company list */
     .company-list { display: flex; flex-direction: column; gap: 10px; }
     .company-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f8fafc; }
     .company-avatar {
       width: 36px; height: 36px; border-radius: 10px;
-      background: linear-gradient(135deg, #1e40af, #3b82f6);
+      background: var(--gradient-primary, linear-gradient(135deg, #0f4b92, #1465c5));
       color: white; display: flex; align-items: center; justify-content: center;
-      font-weight: 700; flex-shrink: 0;
+      font-weight: 700; flex-shrink: 0; box-shadow: 0 4px 10px -4px rgba(30,64,175,0.55);
     }
     .company-meta { flex: 1; }
     .company-name { display: block; font-size: 14px; font-weight: 600; color: #0f172a; }
-    .company-sub { display: block; font-size: 12px; color: #94a3b8; }
-    .badge-status { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-    .badge-status.active { background: #dcfce7; color: #16a34a; }
-    .badge-status.inactive { background: #f1f5f9; color: #64748b; }
+    .company-sub { display: block; font-size: 12px; color: #64748b; }
 
     /* Project list */
     .project-list { display: flex; flex-direction: column; gap: 6px; }
     .project-row {
       display: flex; align-items: center; gap: 12px; padding: 10px 12px;
-      border-radius: 10px; text-decoration: none; transition: background 0.15s;
+      border-radius: 10px; text-decoration: none; transition: background 0.15s, transform 0.15s, border-color 0.15s;
       border: 1px solid transparent;
     }
-    .project-row:hover { background: #f8fafc; border-color: #e2e8f0; }
+    .project-row:hover { background: #f8fafc; border-color: #e2e8f0; transform: translateX(2px); }
     .project-info { flex: 1; }
     .project-name { display: block; font-size: 14px; font-weight: 600; color: #0f172a; }
-    .project-company { display: block; font-size: 12px; color: #94a3b8; }
+    .project-company { display: block; font-size: 12px; color: #64748b; }
     .project-right { display: flex; align-items: center; gap: 8px; }
     .progress-mini { width: 60px; height: 5px; background: #e2e8f0; border-radius: 10px; overflow: hidden; }
-    .progress-fill { height: 100%; background: #3b82f6; border-radius: 10px; }
+    .progress-fill { height: 100%; background: var(--color-primary-500, #1465c5); border-radius: 10px; }
     .progress-pct { font-size: 12px; font-weight: 600; color: #475569; min-width: 30px; text-align: right; }
 
     /* Tickets */
     .ticket-list { display: flex; flex-direction: column; gap: 6px; }
     .ticket-row {
       display: flex; align-items: center; gap: 12px; padding: 10px 12px;
-      border-radius: 10px; text-decoration: none; transition: background 0.15s;
+      border-radius: 10px; text-decoration: none; transition: background 0.15s, transform 0.15s, border-color 0.15s;
       border: 1px solid transparent;
     }
-    .ticket-row:hover { background: #f8fafc; border-color: #e2e8f0; }
-    .ticket-icon { font-size: 20px; }
+    .ticket-row:hover { background: #f8fafc; border-color: #e2e8f0; transform: translateX(2px); }
+    .priority-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .priority-dot.low { background: #16a34a; }
+    .priority-dot.medium { background: #d97706; }
+    .priority-dot.high { background: #ea580c; }
+    .priority-dot.critical { background: #dc2626; }
     .ticket-info { flex: 1; }
     .ticket-title { display: block; font-size: 14px; font-weight: 600; color: #0f172a; }
-    .ticket-company { display: block; font-size: 12px; color: #94a3b8; }
+    .ticket-company { display: block; font-size: 12px; color: #64748b; }
 
-    /* Status badges */
-    .status-badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; }
-    .status-badge.planning { background: #e0e7ff; color: #4338ca; }
-    .status-badge.in_progress { background: #dbeafe; color: #1d4ed8; }
-    .status-badge.review { background: #fef3c7; color: #d97706; }
-    .status-badge.completed { background: #dcfce7; color: #16a34a; }
-    .status-badge.on_hold { background: #f1f5f9; color: #64748b; }
-    .status-badge.open { background: #fef3c7; color: #d97706; }
-    .status-badge.in_review { background: #dbeafe; color: #1d4ed8; }
-    .status-badge.resolved { background: #dcfce7; color: #16a34a; }
-    .status-badge.escalated { background: #fee2e2; color: #dc2626; }
-    .status-badge.closed { background: #f1f5f9; color: #64748b; }
-
-    .empty-msg { color: #94a3b8; font-size: 14px; text-align: center; padding: 20px; }
-    .empty-msg a { color: #3b82f6; }
+    .activity-feed { display: flex; flex-direction: column; gap: 10px; }
+    .activity-feed-row { display: flex; align-items: flex-start; gap: 10px; padding: 4px 0; }
+    .activity-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-primary-500, #1465c5); margin-top: 6px; flex-shrink: 0; }
+    .activity-feed-text { flex: 1; font-size: 13px; color: #374151; margin: 0; line-height: 1.4; }
+    .activity-feed-text strong { color: #0f172a; }
+    .activity-feed-date { font-size: 11.5px; color: #94a3b8; flex-shrink: 0; white-space: nowrap; }
+    .activity-feed-empty { font-size: 13px; color: #94a3b8; margin: 0; text-align: center; padding: 12px 0; }
 
     @media (max-width: 768px) { .content-grid { grid-template-columns: 1fr; } }
   `]
@@ -355,8 +355,24 @@ export class DashboardComponent {
   private companyService = inject(CompanyService);
   private projectService = inject(ProjectService);
   private ticketService = inject(TicketService);
+  private activityLog = inject(ActivityLogService);
+  private invoiceService = inject(InvoiceService);
+
+  recentActivity = computed(() => this.activityLog.getRecent(6));
 
   today = new Date().toLocaleDateString('es-GT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  greeting = computed(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Buenos días';
+    if (hour < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  });
+  firstName = computed(() => this.auth.currentUser()?.name?.split(' ')[0] ?? '');
+  myCompanyLogo = computed(() => {
+    const user = this.auth.currentUser();
+    return user?.companyId ? this.companyService.getById(user.companyId)?.logo : undefined;
+  });
 
   stats = computed(() => {
     const projects = this.projectService.getAll();
@@ -369,6 +385,8 @@ export class DashboardComponent {
       inProgressProjects: projects.filter(p => p.status === 'in_progress').length,
       openTickets: tickets.filter(t => t.status === 'open').length,
       slaBreached: tickets.filter(t => this.ticketService.isSlaBreached(t)).length,
+      avgSatisfaction: this.ticketService.getAverageSatisfaction(tickets),
+      pendingBilling: this.invoiceService.totalPending(),
     };
   });
 
@@ -376,13 +394,26 @@ export class DashboardComponent {
     const projects = this.projectService.getAll();
     const total = projects.length || 1;
     const items = [
-      { label: 'En Progreso', key: 'in_progress', color: '#3b82f6' },
-      { label: 'Revisión', key: 'review', color: '#f59e0b' },
-      { label: 'Completado', key: 'completed', color: '#10b981' },
-      { label: 'Planificación', key: 'planning', color: '#8b5cf6' },
-      { label: 'En Espera', key: 'on_hold', color: '#94a3b8' },
+      { label: 'En Progreso', key: 'in_progress', color: projectStatusColor('in_progress') },
+      { label: 'Revisión', key: 'review', color: projectStatusColor('review') },
+      { label: 'Completado', key: 'completed', color: projectStatusColor('completed') },
+      { label: 'Planificación', key: 'planning', color: projectStatusColor('planning') },
+      { label: 'En Espera', key: 'on_hold', color: projectStatusColor('on_hold') },
     ];
     return items.map(i => ({ ...i, count: projects.filter(p => p.status === i.key).length, pct: Math.round(projects.filter(p => p.status === i.key).length / total * 100) }));
+  });
+
+  projectsByStatusChart = computed(() => {
+    const items = this.projectsByStatus();
+    const total = items.reduce((sum, i) => sum + i.count, 0);
+    let cumulative = 0;
+    const segments = items.filter(i => i.count > 0).map(i => {
+      const start = cumulative;
+      cumulative += total ? (i.count / total) * 100 : 0;
+      return `${i.color} ${start}% ${cumulative}%`;
+    });
+    const gradient = segments.length ? `conic-gradient(${segments.join(', ')})` : 'conic-gradient(#e2e8f0 0 100%)';
+    return { gradient, total };
   });
 
   companySummary = computed(() => {
@@ -420,15 +451,4 @@ export class DashboardComponent {
   });
 
   getCompanyName(id: string) { return this.companyService.getById(id)?.name || 'N/A'; }
-  statusLabel(s: string) {
-    const m: any = { planning: 'Planificación', in_progress: 'En Progreso', review: 'Revisión', completed: 'Completado', on_hold: 'En Espera' };
-    return m[s] || s;
-  }
-  ticketStatusLabel(s: string) {
-    const m: any = { open: 'Abierto', in_review: 'En Revisión', resolved: 'Resuelto', escalated: 'Escalado', closed: 'Cerrado' };
-    return m[s] || s;
-  }
-  priorityIcon(p: string) {
-    return { low: '🟢', medium: '🟡', high: '🟠', critical: '🔴' }[p] || '⚪';
-  }
 }

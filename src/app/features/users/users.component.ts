@@ -1,0 +1,360 @@
+import { Component, inject, signal, computed } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ReactiveFormsModule, FormBuilder, Validators, AbstractControl, ValidationErrors } from '@angular/forms';
+import { UserService } from '../../core/services/user.service';
+import { CompanyService } from '../../core/services/company.service';
+import { User } from '../../core/models';
+import { IconComponent } from '../../shared/icon/icon.component';
+import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
+import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
+import { ConfirmService } from '../../shared/services/confirm.service';
+import { NotificationService } from '../../shared/services/notification.service';
+import { isControlInvalid } from '../../shared/utils/form.util';
+
+@Component({
+  selector: 'app-users',
+  standalone: true,
+  imports: [CommonModule, ReactiveFormsModule, IconComponent, StatCardComponent, ModalFocusTrapDirective],
+  template: `
+    <div class="users-page">
+      <div class="page-header">
+        <div>
+          <h1>Usuarios</h1>
+          <p>Gestiona las cuentas de acceso de tus empresas cliente</p>
+        </div>
+        <button class="btn-primary" (click)="openModal()">
+          <app-icon name="plus" [size]="16" /> Nuevo Usuario
+        </button>
+      </div>
+
+      <div class="quick-stats">
+        <app-stat-card [value]="clientUsers().length" label="Total Usuarios" icon="users" color="blue" />
+        <app-stat-card [value]="companies().length" label="Empresas con Acceso" icon="building" color="indigo" />
+      </div>
+
+      <div class="filters-row">
+        <div class="search-wrap">
+          <app-icon name="search" [size]="16" class="search-icon" />
+          <label for="user-search" class="sr-only">Buscar usuario</label>
+          <input id="user-search" type="text" placeholder="Buscar por nombre, usuario o email..." class="search-input"
+            [value]="search()" (input)="search.set($any($event.target).value)">
+        </div>
+        <label for="user-company-filter" class="sr-only">Filtrar por empresa</label>
+        <select id="user-company-filter" class="filter-select" (change)="companyFilter.set($any($event.target).value)">
+          <option value="">Todas las empresas</option>
+          @for (c of companies(); track c.id) {
+            <option [value]="c.id">{{ c.name }}</option>
+          }
+        </select>
+      </div>
+
+      <div class="users-list">
+        @for (u of filteredUsers(); track u.id) {
+          <div class="user-row">
+            <div class="user-avatar-md" [style.background]="avatarColor(u.id)">{{ u.name[0] }}</div>
+            <div class="user-main">
+              <span class="user-name">{{ u.name }}</span>
+              <span class="user-sub">&#64;{{ u.username }} · {{ u.email }}</span>
+            </div>
+            <span class="company-chip"><app-icon name="building" [size]="12" /> {{ getCompanyName(u.companyId) }}</span>
+            <div class="user-actions">
+              <button class="btn-icon" (click)="editUser(u)" title="Editar" aria-label="Editar usuario">
+                <app-icon name="edit" [size]="15" />
+              </button>
+              <button class="btn-icon" (click)="openResetModal(u)" title="Resetear contraseña" aria-label="Resetear contraseña">
+                <app-icon name="lock" [size]="15" />
+              </button>
+              <button class="btn-icon danger" (click)="deleteUser(u)" title="Eliminar" aria-label="Eliminar usuario">
+                <app-icon name="trash" [size]="15" />
+              </button>
+            </div>
+          </div>
+        } @empty {
+          <div class="empty-state grid-span">
+            <div class="empty-icon"><app-icon name="users" [size]="32" /></div>
+            <h3>Sin usuarios</h3>
+            <p>No hay usuarios que coincidan con tu búsqueda.</p>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Create / Edit Modal -->
+    @if (showModal()) {
+      <div class="modal-overlay" (click)="closeModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title"
+          appModalFocusTrap (closeRequested)="closeModal()" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h2 id="user-modal-title">{{ editingId() ? 'Editar Usuario' : 'Nuevo Usuario' }}</h2>
+            <button class="modal-close" (click)="closeModal()" aria-label="Cerrar">
+              <app-icon name="x" [size]="18" />
+            </button>
+          </div>
+          <form [formGroup]="form" (ngSubmit)="saveUser()" class="modal-body" novalidate>
+            <div class="form-grid">
+              <div class="form-group full">
+                <label for="user-name">Nombre completo *</label>
+                <input id="user-name" type="text" formControlName="name" placeholder="Ej: Carlos López"
+                  [class.error]="invalid('name')" [attr.aria-invalid]="invalid('name')">
+                @if (invalid('name')) { <span class="field-error">El nombre es obligatorio.</span> }
+              </div>
+              <div class="form-group">
+                <label for="user-username">Usuario (login) *</label>
+                <input id="user-username" type="text" formControlName="username" placeholder="ej. empresa4"
+                  [class.error]="invalid('username')" [attr.aria-invalid]="invalid('username')">
+                @if (form.get('username')?.hasError('required') && invalid('username')) {
+                  <span class="field-error">El usuario es obligatorio.</span>
+                }
+                @if (form.get('username')?.hasError('taken')) {
+                  <span class="field-error">Ese nombre de usuario ya está en uso.</span>
+                }
+              </div>
+              <div class="form-group">
+                <label for="user-email">Email *</label>
+                <input id="user-email" type="email" formControlName="email" placeholder="correo@empresa.com"
+                  [class.error]="invalid('email')" [attr.aria-invalid]="invalid('email')">
+                @if (invalid('email')) { <span class="field-error">Ingresa un correo electrónico válido.</span> }
+              </div>
+              <div class="form-group full">
+                <label for="user-company">Empresa *</label>
+                <select id="user-company" formControlName="companyId" [class.error]="invalid('companyId')">
+                  <option value="" disabled>Selecciona una empresa</option>
+                  @for (c of companies(); track c.id) {
+                    <option [value]="c.id">{{ c.name }}</option>
+                  }
+                </select>
+                @if (invalid('companyId')) { <span class="field-error">Selecciona la empresa a la que pertenece.</span> }
+              </div>
+              @if (!editingId()) {
+                <div class="form-group full">
+                  <label for="user-password">Contraseña inicial *</label>
+                  <input id="user-password" type="text" formControlName="password" placeholder="Mínimo 6 caracteres"
+                    [class.error]="invalid('password')" [attr.aria-invalid]="invalid('password')">
+                  @if (invalid('password')) { <span class="field-error">La contraseña debe tener al menos 6 caracteres.</span> }
+                </div>
+              }
+            </div>
+            <div class="modal-footer">
+              @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
+              <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
+              <button type="submit" class="btn-primary" [disabled]="form.invalid">
+                {{ editingId() ? 'Guardar cambios' : 'Crear usuario' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    }
+
+    <!-- Reset Password Modal -->
+    @if (resetUserTarget()) {
+      <div class="modal-overlay" (click)="closeResetModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title"
+          appModalFocusTrap (closeRequested)="closeResetModal()" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h2 id="reset-modal-title">Resetear contraseña</h2>
+            <button class="modal-close" (click)="closeResetModal()" aria-label="Cerrar">
+              <app-icon name="x" [size]="18" />
+            </button>
+          </div>
+          <form [formGroup]="resetForm" (ngSubmit)="confirmReset()" class="modal-body" novalidate>
+            <p class="reset-hint">
+              Vas a establecer una nueva contraseña para <strong>{{ resetUserTarget()!.name }}</strong>
+              ({{ '@' + resetUserTarget()!.username }}). No se envía por correo: deberás comunicársela tú mismo.
+            </p>
+            <div class="form-group">
+              <label for="reset-password">Nueva contraseña *</label>
+              <input id="reset-password" type="text" formControlName="newPassword" placeholder="Mínimo 6 caracteres"
+                [class.error]="isControlInvalid(resetForm.get('newPassword'))">
+              @if (isControlInvalid(resetForm.get('newPassword'))) {
+                <span class="field-error">La contraseña debe tener al menos 6 caracteres.</span>
+              }
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn-secondary" (click)="closeResetModal()">Cancelar</button>
+              <button type="submit" class="btn-primary" [disabled]="resetForm.invalid">Establecer contraseña</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    }
+  `,
+  styles: [`
+    .users-page { max-width: 1100px; margin: 0 auto; }
+
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+
+    .quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 20px; }
+
+    .users-list { display: flex; flex-direction: column; gap: 10px; }
+    .user-row {
+      display: flex; align-items: center; gap: 14px; background: white; border-radius: 14px;
+      border: 1px solid #e2e8f0; padding: 14px 16px; transition: box-shadow 0.2s, border-color 0.2s;
+    }
+    .user-row:hover { box-shadow: var(--shadow-card-hover, 0 8px 24px rgba(0,0,0,0.08)); border-color: var(--color-primary-500, #1465c5); }
+    .user-avatar-md {
+      width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; color: white;
+      display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px;
+    }
+    .user-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .user-name { font-size: 14px; font-weight: 700; color: #0f172a; }
+    .user-sub { font-size: 12.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .company-chip {
+      display: inline-flex; align-items: center; gap: 5px; background: var(--color-neutral-bg, #f1f5f9);
+      color: #475569; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; flex-shrink: 0;
+    }
+    .user-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .btn-icon {
+      width: 32px; height: 32px; border-radius: 8px; border: none;
+      background: var(--color-neutral-bg, #f1f5f9); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; transition: background 0.2s, color 0.2s;
+      color: var(--color-text-secondary, #475569);
+    }
+    .btn-icon:hover { background: var(--color-primary-100, #d1e4fa); color: var(--color-primary-700, #0f4b92); }
+    .btn-icon.danger:hover { background: var(--color-danger-bg, #fee2e2); color: var(--color-danger-text, #dc2626); }
+
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group.full { grid-column: 1/-1; }
+    label { font-size: 13px; font-weight: 600; color: #374151; }
+    input, select {
+      padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      font-size: 14px; outline: none; width: 100%; box-sizing: border-box;
+    }
+    input:focus, select:focus { border-color: var(--color-primary-500, #1465c5); }
+
+    .reset-hint { font-size: 13.5px; color: #475569; background: var(--color-primary-50, #e8f1fd); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; line-height: 1.5; }
+
+    @media (max-width: 640px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full { grid-column: auto; }
+      .user-row { flex-wrap: wrap; }
+      .company-chip { order: 3; }
+    }
+  `]
+})
+export class UsersComponent {
+  private userService = inject(UserService);
+  private companyService = inject(CompanyService);
+  private fb = inject(FormBuilder);
+  private confirm = inject(ConfirmService);
+  private notify = inject(NotificationService);
+
+  isControlInvalid = isControlInvalid;
+
+  search = signal('');
+  companyFilter = signal('');
+  showModal = signal(false);
+  editingId = signal<string | null>(null);
+  resetUserTarget = signal<User | null>(null);
+
+  companies = this.companyService.companies;
+  clientUsers = computed(() => this.userService.users().filter(u => u.role === 'client'));
+
+  form = this.fb.group({
+    name: ['', Validators.required],
+    username: ['', [Validators.required, this.usernameTakenValidator()]],
+    email: ['', [Validators.required, Validators.email]],
+    companyId: ['', Validators.required],
+    password: ['', [Validators.required, Validators.minLength(6)]]
+  });
+
+  resetForm = this.fb.group({
+    newPassword: ['', [Validators.required, Validators.minLength(6)]]
+  });
+
+  filteredUsers = computed(() => {
+    let list = this.clientUsers();
+    const s = this.search().toLowerCase();
+    const cf = this.companyFilter();
+    if (s) list = list.filter(u => u.name.toLowerCase().includes(s) || u.username.toLowerCase().includes(s) || u.email.toLowerCase().includes(s));
+    if (cf) list = list.filter(u => u.companyId === cf);
+    return list;
+  });
+
+  private usernameTakenValidator() {
+    return (control: AbstractControl): ValidationErrors | null => {
+      if (!control.value) return null;
+      return this.userService.isUsernameTaken(control.value, this.editingId() ?? undefined) ? { taken: true } : null;
+    };
+  }
+
+  getCompanyName(companyId?: string): string {
+    if (!companyId) return 'Sin empresa';
+    return this.companyService.getById(companyId)?.name || 'N/A';
+  }
+
+  private readonly avatarPalette = ['#0f4b92', '#a9c238', '#e99d34', '#0891b2', '#7c3aed', '#475569'];
+  avatarColor(id: string): string {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+    return this.avatarPalette[hash % this.avatarPalette.length];
+  }
+
+  invalid(name: string): boolean {
+    return isControlInvalid(this.form.get(name));
+  }
+
+  openModal() {
+    this.editingId.set(null);
+    this.form.reset({ name: '', username: '', email: '', companyId: '', password: '' });
+    this.form.get('password')?.enable();
+    this.showModal.set(true);
+  }
+  closeModal() { this.showModal.set(false); this.editingId.set(null); }
+
+  editUser(u: User) {
+    this.editingId.set(u.id);
+    this.form.patchValue({ name: u.name, username: u.username, email: u.email, companyId: u.companyId || '' });
+    this.form.get('password')?.disable();
+    this.showModal.set(true);
+  }
+
+  saveUser() {
+    if (this.form.invalid) { this.form.markAllAsTouched(); return; }
+    const v = this.form.getRawValue();
+    if (this.editingId()) {
+      this.userService.update(this.editingId()!, {
+        name: v.name!, username: v.username!, email: v.email!, companyId: v.companyId!
+      });
+      this.notify.success('Usuario actualizado correctamente.');
+    } else {
+      this.userService.create({
+        name: v.name!, username: v.username!, email: v.email!, companyId: v.companyId!,
+        password: v.password!, role: 'client'
+      });
+      this.notify.success('Usuario creado correctamente.');
+    }
+    this.closeModal();
+  }
+
+  async deleteUser(u: User) {
+    const ok = await this.confirm.ask({
+      title: 'Eliminar usuario',
+      message: `¿Eliminar el acceso de "${u.name}" (@${u.username})? Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar',
+      danger: true
+    });
+    if (!ok) return;
+    this.userService.delete(u.id);
+    this.notify.success('Usuario eliminado correctamente.');
+  }
+
+  openResetModal(u: User) {
+    this.resetForm.reset({ newPassword: '' });
+    this.resetUserTarget.set(u);
+  }
+  closeResetModal() { this.resetUserTarget.set(null); }
+
+  confirmReset() {
+    if (this.resetForm.invalid) { this.resetForm.markAllAsTouched(); return; }
+    const target = this.resetUserTarget();
+    if (!target) return;
+    this.userService.resetPassword(target.id, this.resetForm.value.newPassword!);
+    this.notify.success(`Contraseña actualizada para ${target.name}.`);
+    this.closeResetModal();
+  }
+}

@@ -80,6 +80,14 @@ export interface Project {
 export type TicketStatus = 'open' | 'in_review' | 'resolved' | 'escalated' | 'closed';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
+export interface TicketAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data: string; // base64
+}
+
 export interface TicketResponse {
   id: string;
   ticketId: string;
@@ -87,6 +95,41 @@ export interface TicketResponse {
   authorName: string;
   authorRole: 'owner' | 'client';
   content: string;
+  createdAt: string;
+  attachments?: TicketAttachment[];
+}
+
+export interface ActivityLogEntry {
+  id: string;
+  actorId: string;
+  actorName: string;
+  entityType: 'company' | 'user' | 'project' | 'ticket' | 'invoice';
+  entityId: string;
+  description: string;
+  createdAt: string;
+}
+
+export interface Invoice {
+  id: string;
+  companyId: string;
+  companyName: string;
+  concept: string;
+  amount: number;
+  issueDate: string;
+  dueDate: string;
+  status: 'pending' | 'paid';
+  paidAt?: string;
+  createdAt: string;
+}
+
+export interface AppNotification {
+  id: string;
+  recipientRole: 'owner' | 'client';
+  recipientCompanyId?: string;
+  title: string;
+  message: string;
+  link: string;
+  read: boolean;
   createdAt: string;
 }
 
@@ -104,4 +147,8 @@ export interface Ticket {
   slaDeadline: string;
   resolvedAt?: string;
   responses: TicketResponse[];
+  attachments?: TicketAttachment[];
+  satisfactionRating?: number;
+  satisfactionComment?: string;
+  ratedAt?: string;
 }
