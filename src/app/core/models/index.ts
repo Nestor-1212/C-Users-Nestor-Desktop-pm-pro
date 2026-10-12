@@ -203,6 +203,8 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
   slaDeadline: string;
+  /** Primera respuesta del equipo (o resolución): ahí se detiene el reloj del SLA. */
+  firstResponseAt?: string;
   resolvedAt?: string;
   responseCount: number;
   responses: TicketResponse[];

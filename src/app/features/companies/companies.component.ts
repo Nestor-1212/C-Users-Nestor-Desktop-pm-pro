@@ -14,7 +14,7 @@ import { ConfirmService } from '../../shared/services/confirm.service';
 import { NotificationService } from '../../shared/services/notification.service';
 import { isControlInvalid } from '../../shared/utils/form.util';
 import { TicketStatusLabelPipe } from '../../shared/pipes/labels.pipe';
-import { localDate, projectSchedule } from '../../shared/utils/project-health';
+import { projectSchedule } from '../../shared/utils/project-health';
 import { companyHealth } from '../../shared/utils/company-health';
 
 type Tab = 'all' | 'active' | 'attention' | 'inactive';
@@ -287,7 +287,7 @@ const SLA_OPTIONS: { value: CompanyPlan; hours: number; hint: string }[] = [
     }
   `,
   styles: [`
-    .companies-page { max-width: 1200px; margin: 0 auto; }
+    .companies-page { max-width: var(--page-max-width); margin: 0 auto; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
     /* Resumen */
@@ -505,7 +505,7 @@ export class CompaniesComponent {
       const openTickets = ct.filter(t => !isClosed(t));
       return {
         ...c,
-        since: localDate(c.createdAt),
+        since: new Date(c.createdAt),
         health: companyHealth(ct, cp, t => this.ticketService.isSlaBreached(t)),
         projectsActive: active.length,
         projectCount: cp.length,
@@ -636,7 +636,7 @@ export class CompaniesComponent {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     const { logo: _preview, ...v } = this.form.getRawValue();
     const data: CompanyInput = {
-      name: v.name!, email: v.email!, phone: v.phone!, address: v.address || undefined,
+      name: v.name!, email: v.email!, phone: v.phone!, address: v.address?.trim() ?? '',
       plan: v.plan!, status: v.status!,
     };
     this.saving.set(true);
@@ -672,6 +672,8 @@ export class CompaniesComponent {
     if (!ok) return;
     try {
       await this.companyService.delete(id);
+      // El servidor borró en cascada sus proyectos y tickets: la caché local también.
+      await Promise.all([this.projectService.load(), this.ticketService.load()]);
       this.closeDrawer();
       this.notify.success('Empresa eliminada correctamente.');
     } catch (err) {

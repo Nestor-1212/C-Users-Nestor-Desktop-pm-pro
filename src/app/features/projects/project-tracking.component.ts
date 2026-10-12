@@ -48,7 +48,7 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     </section>
 
     <!-- Etapas -->
-    <section class="track-card">
+    <section class="track-card stages-card">
       <div class="section-head">
         <h3><app-icon name="trending-up" [size]="17" /> Etapas</h3>
         @if (canEdit() && !editingStages()) {
@@ -111,7 +111,7 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     </section>
 
     <!-- Enlaces -->
-    <section class="track-card">
+    <section class="track-card links-card">
       <div class="section-head">
         <h3><app-icon name="globe" [size]="17" /> Ver el proyecto</h3>
         @if (canEdit() && !linkForm()) {
@@ -192,7 +192,7 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     </section>
 
     <!-- Últimos avances -->
-    <section class="track-card">
+    <section class="track-card updates-card">
       <div class="section-head">
         <h3><app-icon name="bell" [size]="17" /> Últimos avances</h3>
       </div>
@@ -226,6 +226,15 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
   `,
   styles: [`
     :host { display: flex; flex-direction: column; gap: 16px; }
+    /* Pantallas anchas: etapas a la izquierda; enlaces y avances a la derecha. */
+    @media (min-width: 1200px) {
+      :host { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
+      .overview { grid-column: 1 / -1; }
+      .stages-card { grid-column: 1; grid-row: 2 / span 2; }
+      .links-card { grid-column: 2; }
+      .updates-card { grid-column: 2; }
+      .links-card .link-grid { grid-template-columns: 1fr; }
+    }
     .track-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 22px 24px; }
     .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; }
     .section-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }

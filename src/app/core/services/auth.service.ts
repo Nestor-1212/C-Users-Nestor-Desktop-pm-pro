@@ -53,8 +53,18 @@ export class AuthService {
     }
   }
 
+  /** El servidor revoca las sesiones anteriores y entrega un token nuevo para esta. */
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    await firstValueFrom(this.http.post(`${API_URL}/auth/change-password`, { currentPassword, newPassword }));
+    const remembered = !!this.storage.get<Session>(SESSION_KEY) && !this.storage.getSession<Session>(SESSION_KEY);
+    const res = await firstValueFrom(this.http.post<{ token: string }>(
+      `${API_URL}/auth/change-password`, { currentPassword, newPassword, remember: remembered },
+    ));
+    const current = this._session();
+    if (!current) return;
+    const session: Session = { ...current, token: res.token };
+    this._session.set(session);
+    if (remembered) this.storage.set(SESSION_KEY, session);
+    else this.storage.setSession(SESSION_KEY, session);
   }
 
   logout(): void {

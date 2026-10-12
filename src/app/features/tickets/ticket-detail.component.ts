@@ -1,4 +1,5 @@
-import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, OnInit, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, DatePipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -147,7 +148,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
               }
               @if (auth.isOwner()) {
                 <label class="assign-label" for="ticket-assignee">Asignar a un técnico</label>
-                <select id="ticket-assignee" class="assign-select" (change)="assign($any($event.target).value || null)">
+                <select id="ticket-assignee" class="assign-select" (change)="assign($any($event.target).value || null, $any($event.target))">
                   <option value="" [selected]="!ticket()!.assignedTo">Sin asignar</option>
                   @for (m of userService.staff(); track m.id) {
                     <option [value]="m.id" [selected]="ticket()!.assignedTo?.id === m.id">{{ m.name }}</option>
@@ -217,23 +218,31 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
 
             <!-- SLA -->
             <div class="side-card" [class.sla-danger]="ticketService.isSlaBreached(ticket()!)">
-              <h4>SLA Status</h4>
-              @if (ticket()!.status === 'resolved' || ticket()!.status === 'closed') {
+              <h4>Tiempo de respuesta (SLA {{ ticketService.getSlaTotalHours(ticket()!) }} h)</h4>
+              @if (ticket()!.firstResponseAt) {
+                <div [class]="ticketService.slaMet(ticket()!) ? 'sla-ok-info' : 'sla-breached-info'">
+                  <span class="sla-dot" [class.ok]="ticketService.slaMet(ticket()!)" [class.critical]="!ticketService.slaMet(ticket()!)"></span>
+                  <div>
+                    <div class="sla-title">{{ ticketService.slaMet(ticket()!) ? 'Respondido a tiempo' : 'Respondido fuera de plazo' }}</div>
+                    <div class="sla-subtitle">Primera respuesta en {{ ticketService.firstResponseHours(ticket()!) }} h · {{ ticket()!.firstResponseAt | date:'dd/MM/yyyy HH:mm' }}</div>
+                  </div>
+                </div>
+              } @else if (ticket()!.status === 'resolved' || ticket()!.status === 'closed') {
                 <div class="sla-resolved"><app-icon name="check" [size]="15" /> Ticket cerrado</div>
               } @else if (ticketService.isSlaBreached(ticket()!)) {
                 <div class="sla-breached-info">
                   <span class="sla-dot critical"></span>
                   <div>
-                    <div class="sla-title">SLA Vencido</div>
-                    <div class="sla-subtitle">El ticket superó el límite de {{ ticketService.getSlaTotalHours(ticket()!) }}h</div>
+                    <div class="sla-title">Sin respuesta: SLA vencido</div>
+                    <div class="sla-subtitle">Debía responderse antes de {{ ticket()!.slaDeadline | date:'dd/MM/yyyy HH:mm' }}</div>
                   </div>
                 </div>
               } @else {
                 <div class="sla-ok-info">
                   <span class="sla-dot ok"></span>
                   <div>
-                    <div class="sla-title">{{ ticketService.getSlaHoursLeft(ticket()!) }}h restantes</div>
-                    <div class="sla-subtitle">Vence: {{ ticket()!.slaDeadline | date:'dd/MM/yyyy HH:mm' }}</div>
+                    <div class="sla-title">{{ ticketService.getSlaHoursLeft(ticket()!) }} h para la primera respuesta</div>
+                    <div class="sla-subtitle">Responder antes de: {{ ticket()!.slaDeadline | date:'dd/MM/yyyy HH:mm' }}</div>
                   </div>
                 </div>
               }
@@ -286,14 +295,15 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
     }
   `,
   styles: [`
-    .ticket-detail { max-width: 1000px; margin: 0 auto; }
+    .ticket-detail { max-width: var(--page-max-width); margin: 0 auto; }
 
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
     }
 
-    .detail-grid { display: grid; grid-template-columns: 1fr 280px; gap: 20px; }
+    .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; }
+    @media (min-width: 1400px) { .detail-grid { grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; } }
     .main-col { display: flex; flex-direction: column; gap: 16px; }
     .side-col { display: flex; flex-direction: column; gap: 14px; }
 
@@ -432,24 +442,35 @@ export class TicketDetailComponent implements OnInit {
 
   replyForm = this.fb.group({ content: ['', Validators.required] });
 
+  private destroyRef = inject(DestroyRef);
+
+  // Se escucha el parámetro (no solo la foto inicial): al abrir otro ticket desde
+  // una notificación, Angular reutiliza este componente y hay que recargar.
   ngOnInit() {
-    const id = this.route.snapshot.paramMap.get('id') || '';
-    this.ticketId.set(id);
-    const loads: Promise<unknown>[] = [this.ticketService.loadDetail(id)];
-    if (this.auth.isOwner()) loads.push(this.userService.loadStaff());
-    loadPageData(this.notify, ...loads).finally(() => this.loaded.set(true));
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
+      const id = params.get('id') || '';
+      this.ticketId.set(id);
+      this.loaded.set(false);
+      this.replyForm.reset();
+      this.replyAttachment.set(null);
+      this.selectedRating.set(0);
+      const loads: Promise<unknown>[] = [this.ticketService.loadDetail(id)];
+      if (this.auth.isOwner()) loads.push(this.userService.loadStaff());
+      loadPageData(this.notify, ...loads).finally(() => this.loaded.set(true));
+    });
   }
 
   initials(name: string): string {
     return name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
   }
 
-  assign(userId: string | null) {
+  async assign(userId: string | null, select?: HTMLSelectElement) {
     const me = this.auth.currentUser()?.id;
     const msg = userId === null ? 'El ticket quedó sin asignar.'
       : userId === me ? 'Tomaste el ticket.'
       : `Ticket asignado a ${this.userService.staff().find(m => m.id === userId)?.name ?? 'otro integrante'}. Se le notificó.`;
-    this.run(this.ticketService.assign(this.ticketId(), userId), msg);
+    const ok = await this.run(this.ticketService.assign(this.ticketId(), userId), msg);
+    if (!ok && select) select.value = this.ticket()?.assignedTo?.id ?? '';
   }
 
   private async run(action: Promise<unknown>, successMessage: string): Promise<boolean> {

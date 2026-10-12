@@ -178,7 +178,13 @@ textarea:focus-visible,
 .form-hint {
   font-size: 12px; color: var(--color-text-muted); margin-right: auto;
 }
+.form-hint.error-hint { color: var(--color-danger-text); font-weight: 600; }
 input.error, select.error, textarea.error { border-color: var(--color-danger-text) !important; }
+
+/* ============ Ancho de las páginas ============
+   Un solo límite para todo el sistema: aprovecha monitores grandes sin que en
+   pantallas ultra anchas las líneas de texto se vuelvan interminables. */
+:root { --page-max-width: 1760px; }
 
 /* ============ Encabezado de página compartido ============ */
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-4); margin-bottom: 24px; flex-wrap: wrap; }

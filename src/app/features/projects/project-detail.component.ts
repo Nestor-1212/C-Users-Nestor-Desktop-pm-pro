@@ -1,4 +1,5 @@
-import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, OnInit, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, DatePipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -64,7 +65,8 @@ import { ProjectScheduleComponent } from './project-schedule.component';
                 </select>
                 <label for="project-progress-input">Progreso (%):</label>
                 <input id="project-progress-input" type="number" [value]="project()!.progress" min="0" max="100"
-                  (change)="updateProgress(+$any($event.target).value)">
+                  [disabled]="progressFromTasks()" [title]="progressFromTasks() ? 'Se calcula con las tareas del cronograma' : ''"
+                  (change)="updateProgress($any($event.target))">
               </div>
             }
           </div>
@@ -100,12 +102,13 @@ import { ProjectScheduleComponent } from './project-schedule.component';
         </div>
 
         <!-- Tab: Seguimiento (avance, enlaces y últimos avances) -->
-        @if (activeTab() === 'tracking') {
+        <!-- Seguimiento y Cronograma esperan al detalle: la lista no trae etapas ni tareas. -->
+        @if (activeTab() === 'tracking' && loaded()) {
           <app-project-tracking [project]="project()!" [canEdit]="auth.isStaff()" />
         }
 
         <!-- Tab: Cronograma (Gantt de etapas, tareas e hitos) -->
-        @if (activeTab() === 'schedule' && showSchedule()) {
+        @if (activeTab() === 'schedule' && showSchedule() && loaded()) {
           <app-project-schedule [project]="project()!" [canEdit]="auth.isStaff()" />
         }
 
@@ -259,7 +262,7 @@ import { ProjectScheduleComponent } from './project-schedule.component';
     }
   `,
   styles: [`
-    .detail-page { max-width: 900px; margin: 0 auto; }
+    .detail-page { max-width: var(--page-max-width); margin: 0 auto; }
 
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -440,12 +443,22 @@ export class ProjectDetailComponent implements OnInit {
 
   loaded = signal(false);
 
+  private destroyRef = inject(DestroyRef);
+
+  // Al abrir otro proyecto desde una notificación se reutiliza el componente: recargar.
   ngOnInit() {
-    const id = this.route.snapshot.paramMap.get('id') || '';
-    this.projectId.set(id);
-    const loads: Promise<unknown>[] = [this.projectService.loadDetail(id), this.companyService.load()];
-    loadPageData(this.notify, ...loads).finally(() => this.loaded.set(true));
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
+      const id = params.get('id') || '';
+      this.projectId.set(id);
+      this.loaded.set(false);
+      this.activeTab.set('tracking');
+      const loads: Promise<unknown>[] = [this.projectService.loadDetail(id), this.companyService.load()];
+      loadPageData(this.notify, ...loads).finally(() => this.loaded.set(true));
+    });
   }
+
+  /** Con tareas en el cronograma, el avance se calcula solo y no se edita a mano. */
+  progressFromTasks = computed(() => !!this.project()?.tasks.some(t => !t.isMilestone));
 
   /** Ejecuta una acción contra la API mostrando éxito o el error que devuelva. */
   private async run(action: Promise<unknown>, successMessage: string): Promise<boolean> {
@@ -468,9 +481,15 @@ export class ProjectDetailComponent implements OnInit {
     this.run(this.projectService.update(this.projectId(), { status: status as ProjectStatus }), 'Estado del proyecto actualizado.');
   }
 
-  updateProgress(progress: number) {
-    const clamped = Math.max(0, Math.min(100, Math.round(progress)));
-    this.run(this.projectService.update(this.projectId(), { progress: clamped }), 'Progreso actualizado.');
+  updateProgress(input: HTMLInputElement) {
+    const current = this.project()?.progress ?? 0;
+    const value = input.value.trim() === '' ? NaN : Number(input.value);
+    // Vacío o no numérico: se restaura el valor real en lugar de mandar 0.
+    if (!Number.isFinite(value)) { input.value = String(current); return; }
+    const clamped = Math.max(0, Math.min(100, Math.round(value)));
+    if (clamped === current) { input.value = String(current); return; }
+    this.run(this.projectService.update(this.projectId(), { progress: clamped }), 'Progreso actualizado.')
+      .then(ok => { if (!ok) input.value = String(current); });
   }
 
   async addComment() {

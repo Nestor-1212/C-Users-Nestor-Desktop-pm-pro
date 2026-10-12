@@ -42,6 +42,8 @@ const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
         <app-export-menu (formatSelected)="export($event)" />
       </div>
 
+      <div class="activity-layout">
+      <aside class="side">
       <!-- Periodo -->
       <div class="periods" role="group" aria-label="Periodo">
         @for (p of periods; track p.value) {
@@ -76,8 +78,24 @@ const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
             </div>
           </div>
         }
-      }
 
+        @if (topPeople().length) {
+          <div class="people card">
+            <h3>Más activos en el periodo</h3>
+            @for (a of topPeople(); track a.id) {
+              <button class="person" [class.active]="actorId() === a.id" (click)="setActor(actorId() === a.id ? null : a.id)">
+                <span class="av sm" [class]="a.role ?? 'unknown'">{{ initialsOf(a.name) }}</span>
+                <span class="person-name">{{ a.name }}<small>{{ roleLabel(a.role) }}</small></span>
+                <span class="person-bar"><span [style.width.%]="a.pct"></span></span>
+                <strong>{{ a.count }}</strong>
+              </button>
+            }
+          </div>
+        }
+      }
+      </aside>
+
+      <div class="main">
       <!-- Filtros -->
       <div class="filters">
         <div class="search-wrap">
@@ -152,13 +170,35 @@ const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
         }
         @if (loading() && !entries().length) { <p class="loading">Cargando bitácora…</p> }
       </div>
+      </div>
+      </div>
     </div>
   `,
   styles: [`
-    .activity-page { max-width: 1000px; margin: 0 auto; }
+    .activity-page { max-width: var(--page-max-width); margin: 0 auto; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; }
 
+    /* Pantallas anchas: línea de tiempo a la izquierda y resumen fijo a la derecha. */
+    .activity-layout { display: flex; flex-direction: column; }
+    .main { min-width: 0; }
+    @media (min-width: 1280px) {
+      .activity-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 22px; align-items: start; }
+      .side { order: 2; position: sticky; top: 16px; display: flex; flex-direction: column; }
+      .side .summary { grid-template-columns: 1fr 1fr; }
+      .side .summary .sum:first-child { grid-column: 1 / -1; }
+    }
+    .people { padding: 14px 16px; margin-bottom: 14px; }
+    .people h3 { margin: 0 0 10px; font-size: 14px; font-weight: 700; color: #0f172a; }
+    .person { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: none; background: none; border-radius: 10px; cursor: pointer; text-align: left; font-family: inherit; }
+    .person:hover { background: #f8fafc; }
+    .person.active { background: #eef4fc; }
+    .person-name { display: flex; flex-direction: column; font-size: 13px; font-weight: 600; color: #0f172a; width: 150px; flex-shrink: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .person-name small { font-size: 11px; color: #94a3b8; font-weight: 500; }
+    .person-bar { flex: 1; height: 6px; background: #f1f5f9; border-radius: 999px; overflow: hidden; }
+    .person-bar span { display: block; height: 100%; background: #0f4b92; border-radius: 999px; }
+    .person strong { font-size: 13px; color: #0f172a; min-width: 22px; text-align: right; }
+    .av.sm { width: 28px; height: 28px; font-size: 10.5px; }
     .periods { display: inline-flex; gap: 4px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 4px; margin-bottom: 14px; flex-wrap: wrap; }
     .periods button { border: none; background: none; padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; }
     .periods button.active { background: #0f4b92; color: #fff; }
@@ -311,15 +351,17 @@ export class ActivityComponent {
   async loadMore() {
     const cursor = this.nextCursor();
     if (!cursor) return;
+    const id = this.requestId;
     this.loading.set(true);
     try {
       const page = await this.activityLog.page(this.filters(), cursor);
+      if (id !== this.requestId) return; // cambiaron los filtros mientras cargaba
       this.entries.update(list => [...list, ...page.items]);
       this.nextCursor.set(page.nextCursor);
     } catch (err) {
-      this.notify.error(apiErrorMessage(err));
+      if (id === this.requestId) this.notify.error(apiErrorMessage(err));
     } finally {
-      this.loading.set(false);
+      if (id === this.requestId) this.loading.set(false);
     }
   }
 
@@ -340,6 +382,13 @@ export class ActivityComponent {
   }
 
   activePeople = computed(() => this.actors().filter(a => a.role).length);
+
+  /** Las 6 personas con más eventos del periodo (sin intentos anónimos). */
+  topPeople = computed(() => {
+    const people = this.actors().filter(a => a.role).slice(0, 6);
+    const max = Math.max(1, ...people.map(p => p.count));
+    return people.map(p => ({ ...p, pct: (p.count / max) * 100 }));
+  });
 
   /** Eventos agrupados por día local: "Hoy", "Ayer", "lunes 6 de octubre". */
   groups = computed(() => {

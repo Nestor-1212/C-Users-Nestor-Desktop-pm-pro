@@ -224,7 +224,8 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
               </div>
             </div>
             <div class="modal-footer">
-              @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
+              @if (form.hasError('dateOrder')) { <span class="form-hint error-hint">La fecha de fin no puede ser anterior a la de inicio.</span> }
+              @else if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
               <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">
                 {{ editingId() ? 'Guardar cambios' : 'Crear proyecto' }}
@@ -236,7 +237,7 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
     }
   `,
   styles: [`
-    .projects-page { max-width: 1100px; margin: 0 auto; }
+    .projects-page { max-width: var(--page-max-width); margin: 0 auto; }
     .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
     .sr-only {
@@ -244,7 +245,8 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
       overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
     }
 
-    .projects-list { display: flex; flex-direction: column; gap: 12px; }
+    .projects-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+    @media (min-width: 1400px) { .projects-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .project-card { background: white; border-radius: 16px; border: 1px solid #e2e8f0; padding: 20px; display: flex; gap: 20px; transition: box-shadow 0.2s; }
     .project-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
     .project-card-left { display: flex; gap: 14px; flex: 1; }
@@ -341,6 +343,11 @@ export class ProjectsComponent {
     endDate: ['', Validators.required],
     budget: [0 as number | null],
     internalNotes: ['']
+  }, {
+    validators: (g: import('@angular/forms').AbstractControl) => {
+      const s = g.get('startDate')?.value, e = g.get('endDate')?.value;
+      return s && e && e < s ? { dateOrder: true } : null;
+    },
   });
 
   filteredProjects = computed(() => {

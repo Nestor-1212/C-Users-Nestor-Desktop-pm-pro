@@ -248,7 +248,7 @@ function span(ms: number): string {
                       <td class="muted">{{ t.createdByName || '—' }}</td>
                       <td (click)="$event.stopPropagation()">
                         @if (auth.isOwner()) {
-                          <select class="status-select" [attr.aria-label]="'Responsable del ticket ' + t.id" (change)="assign(t, $any($event.target).value || null)">
+                          <select class="status-select" [attr.aria-label]="'Responsable del ticket ' + t.id" (change)="assign(t, $any($event.target).value || null, $any($event.target))">
                             <option value="" [selected]="!t.assignedTo">Sin asignar</option>
                             @for (m of userService.staff(); track m.id) {
                               <option [value]="m.id" [selected]="t.assignedTo?.id === m.id">{{ m.name }}</option>
@@ -263,7 +263,7 @@ function span(ms: number): string {
                       <td><span class="prio-pill" [class]="t.priority">{{ t.priority | priorityLabel }}</span></td>
                       <td (click)="$event.stopPropagation()">
                         <select class="status-select" [attr.aria-label]="'Estado del ticket ' + t.id"
-                          (change)="changeStatus(t, $any($event.target).value)">
+                          (change)="changeStatus(t, $any($event.target).value, $any($event.target))">
                           @for (st of statuses; track st) { <option [value]="st" [selected]="t.status === st">{{ st | ticketStatusLabel }}</option> }
                         </select>
                       </td>
@@ -378,7 +378,7 @@ function span(ms: number): string {
     }
   `,
   styles: [`
-    .tickets-page { max-width: 1100px; margin: 0 auto; }
+    .tickets-page { max-width: var(--page-max-width); margin: 0 auto; }
     .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
     .sr-only {
@@ -439,7 +439,8 @@ function span(ms: number): string {
     .mine-text { font-weight: 700; color: #9a5d0c; }
 
     /* Grupos por empresa */
-    .groups { display: flex; flex-direction: column; gap: 12px; }
+    .groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+    @media (min-width: 1500px) { .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .group { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
     .group.has-breach { border-color: #fca5a5; }
     .group-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #fbfcfe; border: none; border-bottom: 1px solid #eef2f7; cursor: pointer; text-align: left; font-family: inherit; }
@@ -521,7 +522,7 @@ function span(ms: number): string {
 
     @media (max-width: 760px) {
       .t-row { flex-wrap: wrap; }
-      .t-side { width: 100%; padding-left: 16px; }
+      .t-side { width: 100%; padding-left: 16px; flex-wrap: wrap; row-gap: 6px; }
       .g-counters .gc:not(.red) { display: none; }
       .view-toggle button { padding: 7px 9px; font-size: 12px; }
     }
@@ -612,9 +613,10 @@ export class TicketsComponent {
   /** Integrantes para el filtro (sin uno mismo: para eso está "Asignados a mí"). */
   otherStaff = computed(() => this.userService.staff().filter(m => m.id !== this.auth.currentUser()?.id));
 
-  breachedCount = computed(() => this.scopedTickets().filter(t => this.ticketService.isSlaBreached(t)).length);
+  // Se lee now() para que los vencimientos se actualicen solos cada minuto.
+  breachedCount = computed(() => { this.now(); return this.scopedTickets().filter(t => this.ticketService.isSlaBreached(t)).length; });
 
-  bucketTickets = computed(() => this.scopedTickets().filter(t => this.inBucket(t, this.bucket())));
+  bucketTickets = computed(() => { this.now(); return this.scopedTickets().filter(t => this.inBucket(t, this.bucket())); });
 
   companiesWithTickets = computed(() => {
     const ids = new Set(this.ticketService.getAll().map(t => t.companyId));
@@ -694,12 +696,19 @@ export class TicketsComponent {
     return span(this.now() - new Date(iso).getTime());
   }
 
+  /** SLA de primera respuesta: cuenta regresiva hasta que el equipo responde; luego, el resultado. */
   sla(t: Ticket): Tone {
-    if (isClosed(t)) return { tone: 'ok', label: t.resolvedAt ? `Resuelto hace ${this.ago(t.resolvedAt)}` : 'Resuelto' };
+    if (t.firstResponseAt) {
+      const took = new Date(t.firstResponseAt).getTime() - new Date(t.createdAt).getTime();
+      return this.ticketService.slaMet(t)
+        ? { tone: 'ok', label: `Respondido en ${span(took)}` }
+        : { tone: 'soon', label: `Respondido tarde (${span(took)})` };
+    }
+    if (isClosed(t)) return { tone: 'ok', label: 'Resuelto' };
     const left = new Date(t.slaDeadline).getTime() - this.now();
-    if (left < 0) return { tone: 'late', label: `Vencido hace ${span(left)}` };
+    if (left < 0) return { tone: 'late', label: `Sin respuesta · vencido hace ${span(left)}` };
     const total = new Date(t.slaDeadline).getTime() - new Date(t.createdAt).getTime();
-    return { tone: left < total * 0.25 ? 'soon' : '', label: `Vence en ${span(left)}` };
+    return { tone: left < total * 0.25 ? 'soon' : '', label: `Responder en ${span(left)}` };
   }
 
   /** De quién es el turno, según quién escribió de último. */
@@ -738,23 +747,25 @@ export class TicketsComponent {
     this.router.navigate(['/tickets', id]);
   }
 
-  async changeStatus(t: Ticket, status: TicketStatus) {
+  async changeStatus(t: Ticket, status: TicketStatus, select?: HTMLSelectElement) {
     if (t.status === status) return;
     try {
       await this.ticketService.updateStatus(t.id, status);
       this.notify.success(`#${t.id} → ${TICKET_STATUS_LABELS[status]}. El cliente fue notificado.`);
     } catch (err) {
+      if (select) select.value = t.status; // el cambio no se guardó
       this.notify.error(apiErrorMessage(err));
     }
   }
 
-  async assign(t: Ticket, userId: string | null) {
+  async assign(t: Ticket, userId: string | null, select?: HTMLSelectElement) {
     const me = this.auth.currentUser()?.id;
     try {
       await this.ticketService.assign(t.id, userId);
       const who = this.userService.staff().find(m => m.id === userId)?.name;
       this.notify.success(userId === null ? `#${t.id} quedó sin asignar.` : userId === me ? `Tomaste el ticket #${t.id}.` : `#${t.id} asignado a ${who}.`);
     } catch (err) {
+      if (select) select.value = t.assignedTo?.id ?? '';
       this.notify.error(apiErrorMessage(err));
     }
   }
@@ -789,10 +800,10 @@ export class TicketsComponent {
   onAttachmentSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
+    input.value = ''; // permite volver a elegir el mismo archivo después de quitarlo
     if (!file) return;
     if (file.size > MAX_ATTACHMENT_SIZE) {
       this.notify.error(`El archivo es muy pesado (máximo ${formatFileSize(MAX_ATTACHMENT_SIZE)}).`);
-      input.value = '';
       return;
     }
     this.selectedAttachment.set(file);

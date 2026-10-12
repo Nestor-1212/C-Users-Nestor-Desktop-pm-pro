@@ -257,7 +257,7 @@ const initials = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(w =
     </div>
   `,
   styles: [`
-    .dashboard { max-width: 1200px; margin: 0 auto; }
+    .dashboard { max-width: var(--page-max-width); margin: 0 auto; }
     .empty { font-size: 13px; color: #94a3b8; text-align: center; padding: 18px 0; margin: 0; }
 
     /* Encabezado */
@@ -494,17 +494,19 @@ export class DashboardComponent {
     const items: (AttentionItem & { rank: number })[] = [];
     for (const t of this.openTickets()) {
       const left = new Date(t.slaDeadline).getTime() - now;
-      if (left < 0) {
+      // El SLA mide la primera respuesta: un ticket ya respondido no tiene reloj corriendo.
+      const unanswered = !t.firstResponseAt;
+      if (unanswered && left < 0) {
         items.push({ rank: 0 + left / 1e12, severity: 'critical', icon: 'alert-triangle', title: t.title,
-          context: `${t.companyName} · SLA vencido hace ${span(left)}${t.assignedTo ? ' · ' + t.assignedTo.name : ' · sin responsable'}`,
-          link: ['/tickets', t.id], action: 'Atender' });
+          context: `${t.companyName} · sin respuesta, SLA vencido hace ${span(left)}${t.assignedTo ? ' · ' + t.assignedTo.name : ' · sin responsable'}`,
+          link: ['/tickets', t.id], action: 'Responder' });
       } else if (!t.assignedTo && (t.priority === 'critical' || t.priority === 'high')) {
         items.push({ rank: 2, severity: 'warning', icon: 'user', title: t.title,
-          context: `${t.companyName} · prioridad ${t.priority === 'critical' ? 'crítica' : 'alta'} sin responsable · vence en ${span(left)}`,
+          context: `${t.companyName} · prioridad ${t.priority === 'critical' ? 'crítica' : 'alta'} sin responsable${unanswered ? ' · responder en ' + span(left) : ''}`,
           link: ['/tickets', t.id], action: 'Asignar' });
-      } else if (left < 4 * HOUR) {
+      } else if (unanswered && left < 4 * HOUR) {
         items.push({ rank: 1, severity: 'warning', icon: 'clock', title: t.title,
-          context: `${t.companyName} · el SLA vence en ${span(left)}`, link: ['/tickets', t.id], action: 'Ver' });
+          context: `${t.companyName} · hay que responder en ${span(left)}`, link: ['/tickets', t.id], action: 'Responder' });
       }
     }
     for (const p of this.projectRows()) {

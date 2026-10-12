@@ -105,9 +105,25 @@ export class TicketService {
     return Math.round((sum / rated.length) * 10) / 10;
   }
 
+  /**
+   * SLA de primera respuesta: está vencido mientras nadie del equipo haya
+   * respondido y ya pasó el plazo. Una vez respondido, el reloj se detiene.
+   */
   isSlaBreached(ticket: Ticket): boolean {
-    if (ticket.status === 'resolved' || ticket.status === 'closed') return false;
+    if (ticket.firstResponseAt || ticket.status === 'resolved' || ticket.status === 'closed') return false;
     return new Date() > new Date(ticket.slaDeadline);
+  }
+
+  /** Resultado del SLA: true a tiempo, false tarde, null si aún no hay respuesta. */
+  slaMet(ticket: Ticket): boolean | null {
+    if (!ticket.firstResponseAt) return null;
+    return new Date(ticket.firstResponseAt) <= new Date(ticket.slaDeadline);
+  }
+
+  /** Cuánto tardó la primera respuesta, en horas (null si aún no hay). */
+  firstResponseHours(ticket: Ticket): number | null {
+    if (!ticket.firstResponseAt) return null;
+    return Math.round(((new Date(ticket.firstResponseAt).getTime() - new Date(ticket.createdAt).getTime()) / 36e5) * 10) / 10;
   }
 
   getSlaHoursLeft(ticket: Ticket): number {

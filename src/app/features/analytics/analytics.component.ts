@@ -238,7 +238,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
     </div>
   `,
   styles: [`
-    .analytics-page { max-width: 1200px; margin: 0 auto; }
+    .analytics-page { max-width: var(--page-max-width); margin: 0 auto; }
     .page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
     .period { display: inline-flex; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 4px; }
     .period button { border: none; background: none; padding: 8px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; }
@@ -448,12 +448,14 @@ export class AnalyticsComponent {
     const resolved = all.filter(t => within(t.resolvedAt, a, b));
     const rated = all.filter(t => typeof t.satisfactionRating === 'number' && within(t.ratedAt, a, b));
     const hours = avg(resolved.map(t => (new Date(t.resolvedAt!).getTime() - new Date(t.createdAt).getTime()) / HOUR));
-    const onTime = resolved.filter(t => new Date(t.resolvedAt!) <= new Date(t.slaDeadline)).length;
+    // SLA = primera respuesta: se mide sobre los tickets respondidos en el intervalo.
+    const answered = all.filter(t => within(t.firstResponseAt, a, b));
+    const onTime = answered.filter(t => new Date(t.firstResponseAt!) <= new Date(t.slaDeadline)).length;
     return {
       received: received.length,
       resolved: resolved.length,
       hours: hours === null ? null : round1(hours),
-      sla: resolved.length ? Math.round((onTime / resolved.length) * 100) : null,
+      sla: answered.length ? Math.round((onTime / answered.length) * 100) : null,
       csat: rated.length ? round1(avg(rated.map(t => t.satisfactionRating!))!) : null,
     };
   }
@@ -484,7 +486,7 @@ export class AnalyticsComponent {
         ...change(cur.resolved, prev.resolved, true, 'pct'), spark: series.map(s => s.resolved) },
       { key: 'time', label: 'Resolución promedio', icon: 'clock', value: cur.hours !== null ? `${cur.hours} h` : '—', hint: 'menos es mejor',
         ...change(cur.hours, prev.hours, false, 'abs'), spark: series.map(s => s.hours ?? 0) },
-      { key: 'sla', label: 'SLA cumplido', icon: 'alert-triangle', value: cur.sla !== null ? `${cur.sla}%` : '—', hint: 'de los resueltos',
+      { key: 'sla', label: 'SLA cumplido', icon: 'alert-triangle', value: cur.sla !== null ? `${cur.sla}%` : '—', hint: 'respondidos a tiempo',
         ...change(cur.sla, prev.sla, true, 'pts'), spark: series.map(s => s.sla ?? 0) },
       { key: 'csat', label: 'Satisfacción', icon: 'star', value: cur.csat !== null ? `${cur.csat}/5` : '—', hint: 'calificación de clientes',
         ...change(cur.csat, prev.csat, true, 'abs'), spark: series.map(s => s.csat ?? 0) },

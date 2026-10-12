@@ -34,7 +34,7 @@ export function toCompany(c: Api): Company {
   return {
     id: c.id, name: c.name, email: c.email, phone: c.phone, address: opt(c.address),
     status: lower(c.status), plan: PLAN_FROM_API[c.plan] ?? 'Standard',
-    createdAt: dateOnly(c.createdAt), logo: fileUrl(c.logoPath),
+    createdAt: c.createdAt, logo: fileUrl(c.logoPath),
   };
 }
 
@@ -130,6 +130,7 @@ export function toTicket(t: Api): Ticket {
     title: t.title, description: t.description,
     category: lower(t.category), status: lower(t.status), priority: lower(t.priority),
     createdAt: t.createdAt, updatedAt: t.updatedAt, slaDeadline: t.slaDeadline,
+    firstResponseAt: opt(t.firstResponseAt),
     resolvedAt: opt(t.resolvedAt),
     responseCount: t._count?.responses ?? responses.length,
     responses,

@@ -270,7 +270,7 @@ function generatePassword(): string {
     }
   `,
   styles: [`
-    .users-page { max-width: 1100px; margin: 0 auto; }
+    .users-page { max-width: var(--page-max-width); margin: 0 auto; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 
@@ -285,7 +285,8 @@ function generatePassword(): string {
     .notice { display: flex; align-items: center; gap: 10px; background: #fdf3e6; border: 1px solid #f5d3a3; color: #8a520a; border-radius: 12px; padding: 11px 14px; margin-bottom: 16px; font-size: 13.5px; }
 
     /* Clientes por empresa */
-    .companies { display: flex; flex-direction: column; gap: 14px; }
+    .companies { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+    @media (min-width: 1400px) { .companies { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .company { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; }
     .company.no-access { border-style: dashed; border-color: #f5d3a3; }
     .company-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: #fbfcfe; border-bottom: 1px solid #f1f5f9; }
