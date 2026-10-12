@@ -21,7 +21,7 @@ export class UserService {
   private _users = signal<User[]>([]);
   users = this._users.asReadonly();
   private _staff = signal<StaffMember[]>([]);
-  /** Administrador y técnicos: a quién se le puede asignar un ticket. */
+  /** Técnicos: los únicos a quienes se asignan tickets (el administrador supervisa). */
   staff = this._staff.asReadonly();
 
   async loadStaff(): Promise<void> {

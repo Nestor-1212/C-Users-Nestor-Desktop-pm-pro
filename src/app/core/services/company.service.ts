@@ -28,7 +28,7 @@ export class CompanyService {
   private _companies = signal<Company[]>([]);
   companies = this._companies.asReadonly();
 
-  /** El equipo de 3TECH carga todas; un cliente solo la suya (para logo y plan → SLA). */
+  /** El equipo de 3TECH carga todas; un cliente solo la suya (logo y tiempo de respuesta). */
   async load(): Promise<void> {
     const user = this.auth.currentUser();
     if (!user) return;

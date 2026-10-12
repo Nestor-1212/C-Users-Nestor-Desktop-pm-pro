@@ -1,5 +1,5 @@
 import {
-  ActivityLogEntry, AppNotification, Company, CompanyPlan, Invoice, Project, ProjectComment,
+  ActivityLogEntry, AppNotification, Company, CompanyPlan, Project, ProjectComment,
   ProjectDocument, ProjectLink, ProjectRequirement, ProjectStage, ProjectTask, ProjectUpdate, Ticket, TicketAttachment, TicketResponse, User,
 } from '../models';
 import { fileUrl } from '../config/api.config';
@@ -137,6 +137,7 @@ export function toTicket(t: Api): Ticket {
     satisfactionRating: opt(t.satisfactionRating),
     satisfactionComment: opt(t.satisfactionComment),
     ratedAt: opt(t.ratedAt),
+    createdById: opt(t.createdById),
     createdByName: opt(t.createdByName),
     assignedTo: t.assignedTo ? { id: t.assignedTo.id, name: t.assignedTo.name, role: lower(t.assignedTo.role) } : undefined,
     resolvedByName: opt(t.resolvedByName),
@@ -145,16 +146,6 @@ export function toTicket(t: Api): Ticket {
       : responses.length
         ? { authorName: responses[responses.length - 1].authorName, authorRole: responses[responses.length - 1].authorRole, createdAt: responses[responses.length - 1].createdAt }
         : undefined,
-  };
-}
-
-export function toInvoice(i: Api): Invoice {
-  return {
-    id: i.id, companyId: i.companyId, companyName: i.company?.name ?? '',
-    concept: i.concept, amount: Number(i.amount),
-    issueDate: dateOnly(i.issueDate), dueDate: dateOnly(i.dueDate),
-    status: lower(i.status), overdue: i.displayStatus === 'OVERDUE',
-    paidAt: opt(i.paidAt), createdAt: i.createdAt,
   };
 }
 
@@ -167,8 +158,9 @@ export function toNotification(n: Api): AppNotification {
 
 export function toActivity(a: Api): ActivityLogEntry {
   return {
-    id: a.id, actorId: a.actorId, actorName: a.actorName, entityType: lower(a.entityType),
-    entityId: a.entityId, description: a.description, createdAt: a.createdAt,
+    id: a.id, actorId: a.actorId, actorName: a.actorName, actorRole: a.actorRole ? lower<'owner' | 'technician' | 'client'>(a.actorRole) : undefined,
+    entityType: lower(a.entityType), entityId: a.entityId, description: a.description,
+    kind: lower(a.kind ?? 'UPDATE'), ip: opt(a.ip), createdAt: a.createdAt,
   };
 }
 

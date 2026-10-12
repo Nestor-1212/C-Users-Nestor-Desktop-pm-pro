@@ -3,310 +3,407 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators, AbstractControl, ValidationErrors } from '@angular/forms';
 import { UserService } from '../../core/services/user.service';
 import { CompanyService } from '../../core/services/company.service';
-import { User } from '../../core/models';
+import { TicketService } from '../../core/services/ticket.service';
+import { Ticket, User } from '../../core/models';
 import { IconComponent } from '../../shared/icon/icon.component';
-import { StatCardComponent } from '../../shared/stat-card/stat-card.component';
 import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
 import { ConfirmService } from '../../shared/services/confirm.service';
 import { NotificationService } from '../../shared/services/notification.service';
 import { isControlInvalid } from '../../shared/utils/form.util';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 
+type Tab = 'clients' | 'team';
+interface Credentials { title: string; name: string; username: string; password: string }
+
+const isClosed = (t: Ticket) => t.status === 'resolved' || t.status === 'closed';
+const initials = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+/** "Carlos López" → "carlos.lopez" (sin tildes ni símbolos). */
+const suggestUsername = (name: string) => name.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+/** Contraseña legible de 10 caracteres, sin caracteres confusos (0/O, 1/l). */
+function generatePassword(): string {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint32Array(9));
+  return Array.from(bytes, b => chars[b % chars.length]).join('') + '#';
+}
+
 @Component({
   selector: 'app-users',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent, StatCardComponent, ModalFocusTrapDirective],
+  imports: [CommonModule, ReactiveFormsModule, IconComponent, ModalFocusTrapDirective],
   template: `
     <div class="users-page">
       <div class="page-header">
         <div>
           <h1>Usuarios</h1>
-          <p>Cuentas de tus empresas cliente y de tu equipo técnico de 3TECH</p>
+          <p>Quién puede entrar al sistema: las personas de tus clientes y tu equipo técnico</p>
         </div>
-        <button class="btn-primary" (click)="openModal()">
-          <app-icon name="plus" [size]="16" /> Nuevo Usuario
+        <button class="btn-primary" (click)="openModal(tab() === 'team' ? 'technician' : 'client')">
+          <app-icon name="plus" [size]="16" /> {{ tab() === 'team' ? 'Nuevo técnico' : 'Nuevo usuario' }}
         </button>
       </div>
 
-      <div class="quick-stats">
-        <app-stat-card [value]="clientUsers().length" label="Usuarios de Clientes" icon="users" color="blue" />
-        <app-stat-card [value]="technicians().length" label="Técnicos 3TECH" icon="settings" color="yellow" />
-        <app-stat-card [value]="companies().length" label="Empresas con Acceso" icon="building" color="indigo" />
-      </div>
-
-      <div class="role-tabs" role="tablist" aria-label="Tipo de cuenta">
-        <button role="tab" [class.active]="roleFilter() === ''" [attr.aria-selected]="roleFilter() === ''" (click)="roleFilter.set('')">Todos <span>{{ managedUsers().length }}</span></button>
-        <button role="tab" [class.active]="roleFilter() === 'client'" [attr.aria-selected]="roleFilter() === 'client'" (click)="roleFilter.set('client')">Clientes <span>{{ clientUsers().length }}</span></button>
-        <button role="tab" [class.active]="roleFilter() === 'technician'" [attr.aria-selected]="roleFilter() === 'technician'" (click)="roleFilter.set('technician')">Equipo 3TECH <span>{{ technicians().length }}</span></button>
-      </div>
-
-      <div class="filters-row">
+      <div class="toolbar">
+        <div class="tabs" role="tablist" aria-label="Tipo de cuenta">
+          <button role="tab" [class.active]="tab() === 'clients'" [attr.aria-selected]="tab() === 'clients'" (click)="tab.set('clients')">
+            <app-icon name="building" [size]="15" /> Clientes <span class="count">{{ clientUsers().length }}</span>
+          </button>
+          <button role="tab" [class.active]="tab() === 'team'" [attr.aria-selected]="tab() === 'team'" (click)="tab.set('team')">
+            <app-icon name="settings" [size]="15" /> Equipo 3TECH <span class="count">{{ technicians().length }}</span>
+          </button>
+        </div>
         <div class="search-wrap">
           <app-icon name="search" [size]="16" class="search-icon" />
           <label for="user-search" class="sr-only">Buscar usuario</label>
-          <input id="user-search" type="text" placeholder="Buscar por nombre, usuario o email..." class="search-input"
+          <input id="user-search" type="text" class="search-input" [placeholder]="tab() === 'team' ? 'Buscar técnico...' : 'Buscar por nombre, usuario, correo o empresa...'"
             [value]="search()" (input)="search.set($any($event.target).value)">
         </div>
-        <label for="user-company-filter" class="sr-only">Filtrar por empresa</label>
-        <select id="user-company-filter" class="filter-select" (change)="companyFilter.set($any($event.target).value)">
-          <option value="">Todas las empresas</option>
-          @for (c of companies(); track c.id) {
-            <option [value]="c.id">{{ c.name }}</option>
-          }
-        </select>
       </div>
 
-      <div class="users-list">
-        @for (u of filteredUsers(); track u.id) {
-          <div class="user-row">
-            <div class="user-avatar-md" [style.background]="avatarColor(u.id)">{{ u.name[0] }}</div>
-            <div class="user-main">
-              <span class="user-name">{{ u.name }}</span>
-              <span class="user-sub">&#64;{{ u.username }} · {{ u.email }}</span>
-            </div>
-            @if (u.role === 'technician') {
-              <span class="company-chip tech"><app-icon name="settings" [size]="12" /> Técnico 3TECH</span>
-            } @else {
-              <span class="company-chip"><app-icon name="building" [size]="12" /> {{ getCompanyName(u.companyId) }}</span>
-            }
-            <div class="user-actions">
-              <button class="btn-icon" (click)="editUser(u)" title="Editar" aria-label="Editar usuario">
-                <app-icon name="edit" [size]="15" />
-              </button>
-              <button class="btn-icon" (click)="openResetModal(u)" title="Resetear contraseña" aria-label="Resetear contraseña">
-                <app-icon name="lock" [size]="15" />
-              </button>
-              <button class="btn-icon danger" (click)="deleteUser(u)" title="Eliminar" aria-label="Eliminar usuario">
-                <app-icon name="trash" [size]="15" />
-              </button>
-            </div>
-          </div>
-        } @empty {
-          <div class="empty-state grid-span">
-            <div class="empty-icon"><app-icon name="users" [size]="32" /></div>
-            <h3>Sin usuarios</h3>
-            <p>No hay usuarios que coincidan con tu búsqueda.</p>
+      @if (tab() === 'clients') {
+        @if (companiesWithoutAccess().length && !search()) {
+          <div class="notice">
+            <app-icon name="alert-triangle" [size]="16" />
+            <span><strong>{{ companiesWithoutAccess().length }} empresa{{ companiesWithoutAccess().length === 1 ? '' : 's' }} sin acceso:</strong>
+              nadie de {{ companiesWithoutAccess().length === 1 ? 'ella' : 'ellas' }} puede ver sus proyectos ni reportar tickets.</span>
           </div>
         }
-      </div>
+
+        <div class="companies">
+          @for (g of clientGroups(); track g.id) {
+            <section class="company" [class.no-access]="!g.users.length">
+              <header class="company-head">
+                <span class="logo" [class.has-logo]="g.logo" [style.background]="g.logo ? '#fff' : avatarColor(g.id)">
+                  @if (g.logo) { <img [src]="g.logo" alt=""> } @else { {{ g.name[0] }} }
+                </span>
+                <div class="company-title">
+                  <h3>{{ g.name }}</h3>
+                  <span>{{ g.users.length ? g.users.length + ' persona' + (g.users.length === 1 ? '' : 's') + ' con acceso' : 'Sin acceso todavía' }}{{ g.inactive ? ' · empresa inactiva' : '' }}</span>
+                </div>
+                <button class="btn-ghost" (click)="openModal('client', g.id)"><app-icon name="plus" [size]="14" /> {{ g.users.length ? 'Agregar' : 'Crear acceso' }}</button>
+              </header>
+              @for (u of g.users; track u.id) {
+                <div class="person">
+                  <span class="av" [style.background]="avatarColor(u.id)">{{ initialsOf(u.name) }}</span>
+                  <div class="person-main">
+                    <strong>{{ u.name }}</strong>
+                    <span><span class="mono">&#64;{{ u.username }}</span> · <a [href]="'mailto:' + u.email">{{ u.email }}</a></span>
+                  </div>
+                  <span class="stat" [title]="u.ticketsCreated + ' ticket(s) creados'"><app-icon name="ticket" [size]="13" /> {{ u.ticketsCreated }} creado{{ u.ticketsCreated === 1 ? '' : 's' }}</span>
+                  <div class="actions">
+                    <button class="btn-icon" (click)="openResetModal(u)" title="Cambiar contraseña" aria-label="Cambiar contraseña"><app-icon name="lock" [size]="14" /></button>
+                    <button class="btn-icon" (click)="editUser(u)" title="Editar" aria-label="Editar usuario"><app-icon name="edit" [size]="14" /></button>
+                    <button class="btn-icon danger" (click)="deleteUser(u)" title="Quitar acceso" aria-label="Quitar acceso"><app-icon name="trash" [size]="14" /></button>
+                  </div>
+                </div>
+              } @empty {
+                <p class="no-users">Crea al menos un usuario para que esta empresa vea el avance de sus proyectos y pueda pedir soporte.</p>
+              }
+            </section>
+          } @empty {
+            <div class="empty-state"><div class="empty-icon"><app-icon name="users" [size]="30" /></div><h3>Sin resultados</h3><p>No hay usuarios que coincidan con tu búsqueda.</p></div>
+          }
+        </div>
+      } @else {
+        <div class="team">
+          @for (t of teamRows(); track t.id) {
+            <article class="tech">
+              <div class="tech-top">
+                <span class="av lg orange">{{ initialsOf(t.name) }}</span>
+                <div class="person-main">
+                  <strong>{{ t.name }}</strong>
+                  <span><span class="mono">&#64;{{ t.username }}</span></span>
+                  <a [href]="'mailto:' + t.email">{{ t.email }}</a>
+                </div>
+              </div>
+              <div class="tech-stats">
+                <div [class.warn]="t.breached > 0"><strong>{{ t.open }}</strong><span>Abiertos</span></div>
+                <div><strong>{{ t.resolved }}</strong><span>Resueltos</span></div>
+                <div><strong>{{ t.csat ?? '—' }}</strong><span>Satisfacción</span></div>
+              </div>
+              @if (t.breached) { <p class="tech-alert"><app-icon name="alert-triangle" [size]="13" /> {{ t.breached }} ticket{{ t.breached === 1 ? '' : 's' }} con SLA vencido</p> }
+              <div class="tech-actions">
+                <button class="btn-ghost" (click)="openResetModal(t.user)"><app-icon name="lock" [size]="13" /> Contraseña</button>
+                <button class="btn-ghost" (click)="editUser(t.user)"><app-icon name="edit" [size]="13" /> Editar</button>
+                <button class="btn-ghost danger" (click)="deleteUser(t.user)"><app-icon name="trash" [size]="13" /> Quitar</button>
+              </div>
+            </article>
+          } @empty {
+            <div class="empty-state grid-span">
+              <div class="empty-icon"><app-icon name="settings" [size]="30" /></div>
+              <h3>{{ search() ? 'Sin resultados' : 'Aún no tienes técnicos' }}</h3>
+              <p>{{ search() ? 'Ningún técnico coincide con tu búsqueda.' : 'Crea a tu equipo para poder asignarles tickets.' }}</p>
+            </div>
+          }
+        </div>
+        <p class="team-note"><app-icon name="eye" [size]="14" /> Los técnicos ven y trabajan todos los tickets y proyectos. No ven empresas, usuarios, bitácora ni analíticas.</p>
+      }
     </div>
 
-    <!-- Create / Edit Modal -->
+    <!-- Crear / editar -->
     @if (showModal()) {
       <div class="modal-overlay" (click)="closeModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title"
           appModalFocusTrap (closeRequested)="closeModal()" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h2 id="user-modal-title">{{ editingId() ? 'Editar Usuario' : 'Nuevo Usuario' }}</h2>
-            <button class="modal-close" (click)="closeModal()" aria-label="Cerrar">
-              <app-icon name="x" [size]="18" />
-            </button>
+            <h2 id="user-modal-title">{{ editingId() ? 'Editar usuario' : (form.getRawValue().role === 'technician' ? 'Nuevo técnico' : 'Nuevo usuario de cliente') }}</h2>
+            <button class="modal-close" (click)="closeModal()" aria-label="Cerrar"><app-icon name="x" [size]="18" /></button>
           </div>
           <form [formGroup]="form" (ngSubmit)="saveUser()" class="modal-body" novalidate>
-            <div class="form-grid">
-              <div class="form-group full">
-                <span class="field-label">Tipo de cuenta</span>
-                <div class="role-picker" role="radiogroup" aria-label="Tipo de cuenta">
-                  <button type="button" role="radio" [attr.aria-checked]="form.value.role === 'client'" [class.active]="form.getRawValue().role === 'client'"
-                    [disabled]="!!editingId()" (click)="setRole('client')">
-                    <app-icon name="building" [size]="16" />
-                    <span><strong>Cliente</strong><small>Usuario de una empresa cliente</small></span>
-                  </button>
-                  <button type="button" role="radio" [attr.aria-checked]="form.value.role === 'technician'" [class.active]="form.getRawValue().role === 'technician'"
-                    [disabled]="!!editingId()" (click)="setRole('technician')">
-                    <app-icon name="settings" [size]="16" />
-                    <span><strong>Técnico 3TECH</strong><small>Atiende tickets y proyectos</small></span>
-                  </button>
-                </div>
+            @if (!editingId()) {
+              <div class="role-picker" role="radiogroup" aria-label="Tipo de cuenta">
+                <button type="button" role="radio" [attr.aria-checked]="form.getRawValue().role === 'client'" [class.active]="form.getRawValue().role === 'client'" (click)="setRole('client')">
+                  <app-icon name="building" [size]="16" /><span><strong>Cliente</strong><small>Persona de una empresa cliente</small></span>
+                </button>
+                <button type="button" role="radio" [attr.aria-checked]="form.getRawValue().role === 'technician'" [class.active]="form.getRawValue().role === 'technician'" (click)="setRole('technician')">
+                  <app-icon name="settings" [size]="16" /><span><strong>Técnico 3TECH</strong><small>Atiende tickets y proyectos</small></span>
+                </button>
               </div>
+            }
+
+            <div class="form-grid">
+              @if (form.getRawValue().role === 'client') {
+                <div class="form-group full">
+                  <label for="user-company">Empresa *</label>
+                  <select id="user-company" formControlName="companyId" [class.error]="invalid('companyId')">
+                    <option value="" disabled>Selecciona la empresa</option>
+                    @for (c of companies(); track c.id) { <option [value]="c.id">{{ c.name }}</option> }
+                  </select>
+                  @if (invalid('companyId')) { <span class="field-error">Selecciona la empresa a la que pertenece.</span> }
+                </div>
+              }
               <div class="form-group full">
                 <label for="user-name">Nombre completo *</label>
-                <input id="user-name" type="text" formControlName="name" placeholder="Ej: Carlos López"
+                <input id="user-name" type="text" formControlName="name" placeholder="Ej: Carlos López" (input)="onNameInput()"
                   [class.error]="invalid('name')" [attr.aria-invalid]="invalid('name')">
                 @if (invalid('name')) { <span class="field-error">El nombre es obligatorio.</span> }
               </div>
               <div class="form-group">
-                <label for="user-username">Usuario (login) *</label>
-                <input id="user-username" type="text" formControlName="username" placeholder="ej. empresa4"
+                <label for="user-username">Usuario para entrar *</label>
+                <input id="user-username" type="text" formControlName="username" placeholder="carlos.lopez" (input)="usernameTouched = true"
                   [class.error]="invalid('username')" [attr.aria-invalid]="invalid('username')">
-                @if (form.get('username')?.hasError('required') && invalid('username')) {
-                  <span class="field-error">El usuario es obligatorio.</span>
-                }
-                @if (form.get('username')?.hasError('taken')) {
-                  <span class="field-error">Ese nombre de usuario ya está en uso.</span>
-                }
+                @if (form.get('username')?.hasError('taken')) { <span class="field-error">Ese usuario ya existe.</span> }
+                @else if (invalid('username')) { <span class="field-error">El usuario es obligatorio.</span> }
               </div>
               <div class="form-group">
-                <label for="user-email">Email *</label>
+                <label for="user-email">Correo *</label>
                 <input id="user-email" type="email" formControlName="email" placeholder="correo@empresa.com"
                   [class.error]="invalid('email')" [attr.aria-invalid]="invalid('email')">
-                @if (invalid('email')) { <span class="field-error">Ingresa un correo electrónico válido.</span> }
+                @if (invalid('email')) { <span class="field-error">Ingresa un correo válido.</span> }
               </div>
-              @if (form.getRawValue().role === 'client') {
-              <div class="form-group full">
-                <label for="user-company">Empresa *</label>
-                <select id="user-company" formControlName="companyId" [class.error]="invalid('companyId')">
-                  <option value="" disabled>Selecciona una empresa</option>
-                  @for (c of companies(); track c.id) {
-                    <option [value]="c.id">{{ c.name }}</option>
-                  }
-                </select>
-                @if (invalid('companyId')) { <span class="field-error">Selecciona la empresa a la que pertenece.</span> }
-              </div>
-              } @else {
-                <p class="tech-hint full">El técnico ve todos los tickets y proyectos y puede tomar tickets. No ve facturación, empresas, usuarios ni bitácora.</p>
-              }
               @if (!editingId()) {
                 <div class="form-group full">
                   <label for="user-password">Contraseña inicial *</label>
-                  <input id="user-password" type="text" formControlName="password" placeholder="Mínimo 6 caracteres"
-                    [class.error]="invalid('password')" [attr.aria-invalid]="invalid('password')">
+                  <div class="pass-row">
+                    <input id="user-password" [type]="showPassword() ? 'text' : 'password'" formControlName="password" placeholder="Mínimo 6 caracteres"
+                      [class.error]="invalid('password')" [attr.aria-invalid]="invalid('password')">
+                    <button type="button" class="btn-icon" (click)="showPassword.set(!showPassword())" [attr.aria-label]="showPassword() ? 'Ocultar' : 'Mostrar'">
+                      <app-icon [name]="showPassword() ? 'eye-off' : 'eye'" [size]="15" />
+                    </button>
+                    <button type="button" class="btn-ghost" (click)="fillPassword(form)">Generar</button>
+                  </div>
                   @if (invalid('password')) { <span class="field-error">La contraseña debe tener al menos 6 caracteres.</span> }
+                  <span class="hint">Al crear la cuenta te mostraremos los datos de acceso listos para enviar.</span>
                 </div>
               }
             </div>
             <div class="modal-footer">
-              @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
-              <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">
-                {{ editingId() ? 'Guardar cambios' : 'Crear usuario' }}
-              </button>
+              <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">{{ editingId() ? 'Guardar cambios' : 'Crear acceso' }}</button>
             </div>
           </form>
         </div>
       </div>
     }
 
-    <!-- Reset Password Modal -->
-    @if (resetUserTarget()) {
+    <!-- Cambiar contraseña -->
+    @if (resetUserTarget(); as target) {
       <div class="modal-overlay" (click)="closeResetModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title"
+        <div class="modal small" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title"
           appModalFocusTrap (closeRequested)="closeResetModal()" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h2 id="reset-modal-title">Resetear contraseña</h2>
-            <button class="modal-close" (click)="closeResetModal()" aria-label="Cerrar">
-              <app-icon name="x" [size]="18" />
-            </button>
+            <h2 id="reset-modal-title">Nueva contraseña</h2>
+            <button class="modal-close" (click)="closeResetModal()" aria-label="Cerrar"><app-icon name="x" [size]="18" /></button>
           </div>
           <form [formGroup]="resetForm" (ngSubmit)="confirmReset()" class="modal-body" novalidate>
-            <p class="reset-hint">
-              Vas a establecer una nueva contraseña para <strong>{{ resetUserTarget()!.name }}</strong>
-              ({{ '@' + resetUserTarget()!.username }}). No se envía por correo: deberás comunicársela tú mismo.
-            </p>
-            <div class="form-group">
-              <label for="reset-password">Nueva contraseña *</label>
-              <input id="reset-password" type="text" formControlName="newPassword" placeholder="Mínimo 6 caracteres"
+            <p class="reset-hint">Para <strong>{{ target.name }}</strong> (&#64;{{ target.username }}). La contraseña anterior dejará de funcionar.</p>
+            <div class="pass-row">
+              <label for="reset-password" class="sr-only">Nueva contraseña</label>
+              <input id="reset-password" [type]="showPassword() ? 'text' : 'password'" formControlName="newPassword" placeholder="Mínimo 6 caracteres"
                 [class.error]="isControlInvalid(resetForm.get('newPassword'))">
-              @if (isControlInvalid(resetForm.get('newPassword'))) {
-                <span class="field-error">La contraseña debe tener al menos 6 caracteres.</span>
-              }
+              <button type="button" class="btn-icon" (click)="showPassword.set(!showPassword())" [attr.aria-label]="showPassword() ? 'Ocultar' : 'Mostrar'">
+                <app-icon [name]="showPassword() ? 'eye-off' : 'eye'" [size]="15" />
+              </button>
+              <button type="button" class="btn-ghost" (click)="fillPassword(resetForm)">Generar</button>
             </div>
+            @if (isControlInvalid(resetForm.get('newPassword'))) { <span class="field-error">Mínimo 6 caracteres.</span> }
             <div class="modal-footer">
               <button type="button" class="btn-secondary" (click)="closeResetModal()">Cancelar</button>
-              <button type="submit" class="btn-primary" [disabled]="resetForm.invalid">Establecer contraseña</button>
+              <button type="submit" class="btn-primary" [disabled]="resetForm.invalid || saving()">Cambiar contraseña</button>
             </div>
           </form>
+        </div>
+      </div>
+    }
+
+    <!-- Datos de acceso listos para compartir -->
+    @if (credentials(); as cr) {
+      <div class="modal-overlay" (click)="credentials.set(null)">
+        <div class="modal small" role="dialog" aria-modal="true" aria-labelledby="cred-title"
+          appModalFocusTrap (closeRequested)="credentials.set(null)" (click)="$event.stopPropagation()">
+          <div class="cred-body">
+            <span class="cred-check"><app-icon name="check" [size]="26" [strokeWidth]="2.5" /></span>
+            <h2 id="cred-title">{{ cr.title }}</h2>
+            <p>Comparte estos datos con <strong>{{ cr.name }}</strong>. Por seguridad no se volverán a mostrar.</p>
+            <div class="cred-box">
+              <div><span>Dirección</span><code>{{ loginUrl }}</code></div>
+              <div><span>Usuario</span><code>{{ cr.username }}</code></div>
+              <div><span>Contraseña</span><code>{{ cr.password }}</code></div>
+            </div>
+            <div class="cred-actions">
+              <button class="btn-primary" (click)="copyCredentials(cr)"><app-icon name="copy" [size]="15" /> Copiar datos de acceso</button>
+              <button class="btn-secondary" (click)="credentials.set(null)">Listo</button>
+            </div>
+          </div>
         </div>
       </div>
     }
   `,
   styles: [`
     .users-page { max-width: 1100px; margin: 0 auto; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 
-    .sr-only {
-      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
-    }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .tabs { display: inline-flex; gap: 4px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 4px; }
+    .tabs button { border: none; background: none; padding: 8px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+    .tabs button.active { background: #0f4b92; color: #fff; }
+    .count { background: #f1f5f9; color: #475569; border-radius: 999px; padding: 0 8px; font-size: 12px; }
+    .tabs button.active .count { background: rgba(255,255,255,0.22); color: #fff; }
+    .toolbar .search-wrap { flex: 1; min-width: 240px; }
 
-    .role-tabs { display: inline-flex; gap: 4px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 4px; margin-bottom: 14px; }
-    .role-tabs button { border: none; background: none; padding: 7px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; display: inline-flex; gap: 7px; align-items: center; }
-    .role-tabs button span { background: #f1f5f9; border-radius: 999px; padding: 0 8px; font-size: 12px; }
-    .role-tabs button.active { background: #0f4b92; color: #fff; }
-    .role-tabs button.active span { background: rgba(255,255,255,0.22); }
-    .company-chip.tech { background: #fdf3e6; color: #9a5d0c; }
-    .field-label { font-size: 13px; font-weight: 600; color: #374151; }
-    .role-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .notice { display: flex; align-items: center; gap: 10px; background: #fdf3e6; border: 1px solid #f5d3a3; color: #8a520a; border-radius: 12px; padding: 11px 14px; margin-bottom: 16px; font-size: 13.5px; }
+
+    /* Clientes por empresa */
+    .companies { display: flex; flex-direction: column; gap: 14px; }
+    .company { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; }
+    .company.no-access { border-style: dashed; border-color: #f5d3a3; }
+    .company-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: #fbfcfe; border-bottom: 1px solid #f1f5f9; }
+    .logo { width: 38px; height: 38px; border-radius: 10px; color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+    .logo.has-logo { box-shadow: inset 0 0 0 1.5px #e2e8f0; }
+    .logo img { width: 100%; height: 100%; object-fit: contain; padding: 3px; box-sizing: border-box; }
+    .company-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .company-title h3 { margin: 0; font-size: 15px; font-weight: 800; color: #0f172a; }
+    .company-title span { font-size: 12px; color: #64748b; }
+    .no-access .company-title span { color: #b06a0c; font-weight: 600; }
+    .person { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid #f8fafc; }
+    .person:last-child { border-bottom: none; }
+    .person:hover { background: #fafbfd; }
+    .av { width: 36px; height: 36px; border-radius: 50%; color: #fff; font-size: 12.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .av.lg { width: 48px; height: 48px; font-size: 16px; }
+    .av.orange { background: #e99d34; }
+    .person-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .person-main strong { font-size: 14px; color: #0f172a; }
+    .person-main span, .person-main a { font-size: 12.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .person-main a { color: #0f4b92; text-decoration: none; }
+    .person-main a:hover { text-decoration: underline; }
+    .stat { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #64748b; background: #f8fafc; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+    .actions { display: flex; gap: 4px; }
+    .no-users { margin: 0; padding: 14px 16px; font-size: 13px; color: #8a520a; }
+
+    .btn-icon { width: 30px; height: 30px; border-radius: 8px; border: none; background: #f1f5f9; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #475569; flex-shrink: 0; }
+    .btn-icon:hover { background: #d1e4fa; color: #0f4b92; }
+    .btn-icon.danger:hover { background: #fee2e2; color: #dc2626; }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 5px; border: none; background: #eef4fc; color: #0f4b92; font-weight: 700; font-size: 12.5px; padding: 7px 11px; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+    .btn-ghost:hover { background: #d1e4fa; }
+    .btn-ghost.danger { background: #fef2f2; color: #dc2626; }
+
+    /* Equipo */
+    .team { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .tech { background: #fff; border: 1px solid #e2e8f0; border-top: 4px solid #e99d34; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .tech-top { display: flex; align-items: center; gap: 12px; }
+    .tech-stats { display: grid; grid-template-columns: repeat(3, 1fr); background: #f8fafc; border-radius: 12px; padding: 10px 0; }
+    .tech-stats div { display: flex; flex-direction: column; align-items: center; border-right: 1px solid #eef2f7; }
+    .tech-stats div:last-child { border-right: none; }
+    .tech-stats strong { font-size: 20px; font-weight: 800; color: #0f172a; }
+    .tech-stats span { font-size: 11px; color: #64748b; }
+    .tech-stats .warn strong { color: #dc2626; }
+    .tech-alert { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; font-weight: 600; color: #dc2626; }
+    .tech-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .team-note { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: #64748b; margin: 16px 0 0; }
+
+    /* Formularios */
+    .modal.small { max-width: 440px; }
+    .role-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
     .role-picker button { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 12px; border: 1.5px solid #e2e8f0; border-radius: 12px; background: #fff; cursor: pointer; font-family: inherit; color: #475569; }
-    .role-picker button span { display: flex; flex-direction: column; }
-    .role-picker button strong { font-size: 13.5px; color: #0f172a; }
-    .role-picker button small { font-size: 12px; color: #64748b; }
+    .role-picker span { display: flex; flex-direction: column; }
+    .role-picker strong { font-size: 13.5px; color: #0f172a; }
+    .role-picker small { font-size: 12px; color: #64748b; }
     .role-picker button.active { border-color: #0f4b92; background: #eef4fc; color: #0f4b92; }
-    .role-picker button:disabled:not(.active) { opacity: 0.45; cursor: not-allowed; }
-    .tech-hint { grid-column: 1 / -1; font-size: 12.5px; color: #9a5d0c; background: #fdf3e6; border-radius: 10px; padding: 10px 12px; margin: 0; }
-    .quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 20px; }
-
-    .users-list { display: flex; flex-direction: column; gap: 10px; }
-    .user-row {
-      display: flex; align-items: center; gap: 14px; background: white; border-radius: 14px;
-      border: 1px solid #e2e8f0; padding: 14px 16px; transition: box-shadow 0.2s, border-color 0.2s;
-    }
-    .user-row:hover { box-shadow: var(--shadow-card-hover, 0 8px 24px rgba(0,0,0,0.08)); border-color: var(--color-primary-500, #1465c5); }
-    .user-avatar-md {
-      width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; color: white;
-      display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px;
-    }
-    .user-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-    .user-name { font-size: 14px; font-weight: 700; color: #0f172a; }
-    .user-sub { font-size: 12.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .company-chip {
-      display: inline-flex; align-items: center; gap: 5px; background: var(--color-neutral-bg, #f1f5f9);
-      color: #475569; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; flex-shrink: 0;
-    }
-    .user-actions { display: flex; gap: 6px; flex-shrink: 0; }
-    .btn-icon {
-      width: 32px; height: 32px; border-radius: 8px; border: none;
-      background: var(--color-neutral-bg, #f1f5f9); cursor: pointer;
-      display: flex; align-items: center; justify-content: center; transition: background 0.2s, color 0.2s;
-      color: var(--color-text-secondary, #475569);
-    }
-    .btn-icon:hover { background: var(--color-primary-100, #d1e4fa); color: var(--color-primary-700, #0f4b92); }
-    .btn-icon.danger:hover { background: var(--color-danger-bg, #fee2e2); color: var(--color-danger-text, #dc2626); }
-
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group.full { grid-column: 1/-1; }
     label { font-size: 13px; font-weight: 600; color: #374151; }
-    input, select {
-      padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
-      font-size: 14px; outline: none; width: 100%; box-sizing: border-box;
-    }
-    input:focus, select:focus { border-color: var(--color-primary-500, #1465c5); }
+    input, select { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; }
+    input:focus, select:focus { border-color: #0f4b92; }
+    .pass-row { display: flex; gap: 6px; align-items: center; }
+    .pass-row input { flex: 1; }
+    .pass-row .btn-icon { height: 40px; width: 40px; }
+    .pass-row .btn-ghost { height: 40px; }
+    .hint { font-size: 12px; color: #94a3b8; }
+    .reset-hint { font-size: 13.5px; color: #475569; background: #eef4fc; border-radius: 10px; padding: 12px 14px; margin: 0 0 14px; line-height: 1.5; }
 
-    .reset-hint { font-size: 13.5px; color: #475569; background: var(--color-primary-50, #e8f1fd); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; line-height: 1.5; }
+    /* Datos de acceso */
+    .cred-body { padding: 28px 24px 22px; text-align: center; }
+    .cred-check { width: 56px; height: 56px; border-radius: 50%; background: #a9c238; color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+    .cred-body h2 { font-size: 19px; margin: 12px 0 6px; color: #0f172a; }
+    .cred-body p { font-size: 13.5px; color: #64748b; margin: 0 0 16px; }
+    .cred-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 6px 14px; text-align: left; }
+    .cred-box div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #eef2f7; font-size: 13px; }
+    .cred-box div:last-child { border-bottom: none; }
+    .cred-box span { color: #64748b; }
+    .cred-box code { font-family: ui-monospace, Consolas, monospace; color: #0f172a; font-weight: 700; word-break: break-all; text-align: right; }
+    .cred-actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
 
     @media (max-width: 640px) {
       .form-grid { grid-template-columns: 1fr; }
       .form-group.full { grid-column: auto; }
-      .user-row { flex-wrap: wrap; }
-      .company-chip { order: 3; }
+      .person { flex-wrap: wrap; }
+      .stat { order: 3; }
     }
   `]
 })
 export class UsersComponent {
   private userService = inject(UserService);
   private companyService = inject(CompanyService);
+  private ticketService = inject(TicketService);
   private fb = inject(FormBuilder);
   private confirm = inject(ConfirmService);
   private notify = inject(NotificationService);
 
   isControlInvalid = isControlInvalid;
+  initialsOf = initials;
+  readonly loginUrl = `${window.location.origin}/login`;
 
+  tab = signal<Tab>('clients');
   search = signal('');
-  companyFilter = signal('');
-  roleFilter = signal<'' | 'client' | 'technician'>('');
   showModal = signal(false);
   editingId = signal<string | null>(null);
   resetUserTarget = signal<User | null>(null);
+  credentials = signal<Credentials | null>(null);
+  showPassword = signal(false);
   saving = signal(false);
+  /** Si el usuario ya escribió el login a mano, dejamos de sugerirlo a partir del nombre. */
+  usernameTouched = false;
 
   companies = this.companyService.companies;
 
   constructor() {
-    loadPageData(this.notify, this.userService.load(), this.companyService.load());
+    loadPageData(this.notify, this.userService.load(), this.companyService.load(), this.ticketService.load());
   }
-  managedUsers = computed(() => this.userService.users().filter(u => u.role === 'client' || u.role === 'technician'));
-  clientUsers = computed(() => this.managedUsers().filter(u => u.role === 'client'));
-  technicians = computed(() => this.managedUsers().filter(u => u.role === 'technician'));
+
+  clientUsers = computed(() => this.userService.users().filter(u => u.role === 'client'));
+  technicians = computed(() => this.userService.users().filter(u => u.role === 'technician'));
 
   form = this.fb.group({
     role: ['client' as 'client' | 'technician'],
@@ -321,14 +418,48 @@ export class UsersComponent {
     newPassword: ['', [Validators.required, Validators.minLength(6)]]
   });
 
-  filteredUsers = computed(() => {
-    const rf = this.roleFilter();
-    let list = rf ? this.managedUsers().filter(u => u.role === rf) : this.managedUsers();
-    const s = this.search().toLowerCase();
-    const cf = this.companyFilter();
-    if (s) list = list.filter(u => u.name.toLowerCase().includes(s) || u.username.toLowerCase().includes(s) || u.email.toLowerCase().includes(s));
-    if (cf) list = list.filter(u => u.companyId === cf);
-    return list;
+  private matches(text: string[]): boolean {
+    const s = this.search().trim().toLowerCase();
+    return !s || text.some(v => v.toLowerCase().includes(s));
+  }
+
+  /** Empresas con sus usuarios: primero las que no tienen acceso, luego por nombre. */
+  clientGroups = computed(() => {
+    const tickets = this.ticketService.getAll();
+    const users = this.clientUsers();
+    return this.companies()
+      .map(c => {
+        const companyMatches = this.matches([c.name]);
+        const members = users.filter(u => u.companyId === c.id)
+          .filter(u => companyMatches || this.matches([u.name, u.username, u.email]))
+          .map(u => ({ ...u, ticketsCreated: tickets.filter(t => t.createdById === u.id).length }));
+        return { id: c.id, name: c.name, logo: c.logo, inactive: c.status === 'inactive', users: members, show: companyMatches || members.length > 0 };
+      })
+      .filter(g => g.show)
+      .sort((a, b) => Number(a.users.length > 0) - Number(b.users.length > 0) || Number(a.inactive) - Number(b.inactive) || a.name.localeCompare(b.name));
+  });
+
+  companiesWithoutAccess = computed(() => {
+    const withUsers = new Set(this.clientUsers().map(u => u.companyId));
+    return this.companies().filter(c => c.status === 'active' && !withUsers.has(c.id));
+  });
+
+  teamRows = computed(() => {
+    const tickets = this.ticketService.getAll();
+    return this.technicians()
+      .filter(u => this.matches([u.name, u.username, u.email]))
+      .map(u => {
+        const mine = tickets.filter(t => t.assignedTo?.id === u.id);
+        const open = mine.filter(t => !isClosed(t));
+        return {
+          id: u.id, name: u.name, username: u.username, email: u.email, user: u,
+          open: open.length,
+          breached: open.filter(t => this.ticketService.isSlaBreached(t)).length,
+          resolved: mine.filter(isClosed).length,
+          csat: this.ticketService.getAverageSatisfaction(mine),
+        };
+      })
+      .sort((a, b) => b.open - a.open);
   });
 
   private usernameTakenValidator() {
@@ -336,11 +467,6 @@ export class UsersComponent {
       if (!control.value) return null;
       return this.userService.isUsernameTaken(control.value, this.editingId() ?? undefined) ? { taken: true } : null;
     };
-  }
-
-  getCompanyName(companyId?: string): string {
-    if (!companyId) return 'Sin empresa';
-    return this.companyService.getById(companyId)?.name || 'N/A';
   }
 
   private readonly avatarPalette = ['#0f4b92', '#a9c238', '#e99d34', '#0891b2', '#7c3aed', '#475569'];
@@ -361,10 +487,24 @@ export class UsersComponent {
     if (role === 'technician') company?.disable(); else company?.enable();
   }
 
-  openModal() {
+  onNameInput() {
+    if (this.editingId() || this.usernameTouched) return;
+    this.form.patchValue({ username: suggestUsername(this.form.value.name ?? '') });
+  }
+
+  fillPassword(target: typeof this.form | typeof this.resetForm) {
+    const pwd = generatePassword();
+    if (target === this.resetForm) this.resetForm.patchValue({ newPassword: pwd });
+    else this.form.patchValue({ password: pwd });
+    this.showPassword.set(true);
+  }
+
+  openModal(role: 'client' | 'technician', companyId = '') {
     this.editingId.set(null);
-    this.form.reset({ role: this.roleFilter() === 'technician' ? 'technician' : 'client', name: '', username: '', email: '', companyId: '', password: '' });
-    this.setRole(this.form.getRawValue().role!);
+    this.usernameTouched = false;
+    this.showPassword.set(false);
+    this.form.reset({ role, name: '', username: '', email: '', companyId, password: '' });
+    this.setRole(role);
     this.form.get('password')?.enable();
     this.showModal.set(true);
   }
@@ -372,7 +512,8 @@ export class UsersComponent {
 
   editUser(u: User) {
     this.editingId.set(u.id);
-    this.form.patchValue({ name: u.name, username: u.username, email: u.email, companyId: u.companyId || '' });
+    this.usernameTouched = true;
+    this.form.reset({ role: u.role === 'technician' ? 'technician' : 'client', name: u.name, username: u.username, email: u.email, companyId: u.companyId || '', password: '' });
     this.setRole(u.role === 'technician' ? 'technician' : 'client');
     this.form.get('password')?.disable();
     this.showModal.set(true);
@@ -382,16 +523,16 @@ export class UsersComponent {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     const v = this.form.getRawValue();
     const isTech = v.role === 'technician';
-    const data = { name: v.name!, username: v.username!, email: v.email!, companyId: isTech ? null : v.companyId! };
+    const data = { name: v.name!.trim(), username: v.username!.trim(), email: v.email!.trim(), companyId: isTech ? null : v.companyId! };
     this.saving.set(true);
     try {
       if (this.editingId()) {
         const { companyId, ...common } = data;
         await this.userService.update(this.editingId()!, isTech ? common : { ...common, companyId });
-        this.notify.success('Usuario actualizado correctamente.');
+        this.notify.success('Usuario actualizado.');
       } else {
         await this.userService.create({ ...data, role: v.role!, password: v.password! });
-        this.notify.success(isTech ? 'Técnico creado. Ya puede iniciar sesión y tomar tickets.' : 'Usuario creado correctamente.');
+        this.credentials.set({ title: isTech ? 'Técnico creado' : 'Acceso creado', name: data.name, username: data.username, password: v.password! });
       }
       this.closeModal();
     } catch (err) {
@@ -403,21 +544,22 @@ export class UsersComponent {
 
   async deleteUser(u: User) {
     const ok = await this.confirm.ask({
-      title: 'Eliminar usuario',
-      message: `¿Eliminar el acceso de "${u.name}" (@${u.username})? Esta acción no se puede deshacer.`,
-      confirmLabel: 'Eliminar',
+      title: 'Quitar acceso',
+      message: `¿Quitar el acceso de "${u.name}" (@${u.username})? Ya no podrá iniciar sesión. Sus tickets y comentarios se conservan.`,
+      confirmLabel: 'Quitar acceso',
       danger: true
     });
     if (!ok) return;
     try {
       await this.userService.delete(u.id);
-      this.notify.success('Usuario eliminado correctamente.');
+      this.notify.success('Acceso eliminado.');
     } catch (err) {
       this.notify.error(apiErrorMessage(err));
     }
   }
 
   openResetModal(u: User) {
+    this.showPassword.set(false);
     this.resetForm.reset({ newPassword: '' });
     this.resetUserTarget.set(u);
   }
@@ -427,12 +569,26 @@ export class UsersComponent {
     if (this.resetForm.invalid) { this.resetForm.markAllAsTouched(); return; }
     const target = this.resetUserTarget();
     if (!target) return;
+    const password = this.resetForm.value.newPassword!;
+    this.saving.set(true);
     try {
-      await this.userService.resetPassword(target.id, this.resetForm.value.newPassword!);
-      this.notify.success(`Contraseña actualizada para ${target.name}.`);
+      await this.userService.resetPassword(target.id, password);
       this.closeResetModal();
+      this.credentials.set({ title: 'Contraseña actualizada', name: target.name, username: target.username, password });
     } catch (err) {
       this.notify.error(apiErrorMessage(err));
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  async copyCredentials(cr: Credentials) {
+    const text = `Acceso a Tikets y Proceso (3TECH)\nDirección: ${this.loginUrl}\nUsuario: ${cr.username}\nContraseña: ${cr.password}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.notify.success('Datos de acceso copiados. Pégalos en un correo o mensaje.');
+    } catch {
+      this.notify.error('No se pudo copiar. Selecciona el texto manualmente.');
     }
   }
 }

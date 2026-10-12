@@ -37,12 +37,6 @@ export const routes: Routes = [
         canActivate: [ownerGuard]
       },
       {
-        path: 'billing',
-        data: { title: 'Facturación' },
-        loadComponent: () => import('./features/billing/billing.component').then(m => m.BillingComponent),
-        canActivate: [notTechnicianGuard]
-      },
-      {
         path: 'analytics',
         data: { title: 'Analíticas' },
         loadComponent: () => import('./features/analytics/analytics.component').then(m => m.AnalyticsComponent),

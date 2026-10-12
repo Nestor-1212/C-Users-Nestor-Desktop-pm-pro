@@ -6,14 +6,7 @@ import { ProjectLinkInput, ProjectService } from '../../core/services/project.se
 import { apiErrorMessage } from '../../core/http/api-error';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
 import { NotificationService } from '../../shared/services/notification.service';
-
-type Schedule = { tone: 'done' | 'ok' | 'risk' | 'late' | 'paused' | 'upcoming'; label: string; detail: string };
-
-const DAY = 24 * 60 * 60 * 1000;
-/** 'YYYY-MM-DD' como medianoche local (new Date('YYYY-MM-DD') sería UTC y movería el día). */
-const localDate = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); };
-const today = () => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; };
-const daysBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / DAY);
+import { expectedProgress, projectSchedule } from '../../shared/utils/project-health';
 
 const LINK_TYPES: { value: ProjectLinkType; label: string; icon: IconName }[] = [
   { value: 'staging', label: 'Sitio de pruebas', icon: 'globe' },
@@ -241,7 +234,7 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     .hint { font-size: 12.5px; color: #64748b; margin: 0 0 12px; }
 
     /* Avance general */
-    .overview { background: linear-gradient(135deg, #0f4b92 0%, #1465c5 100%); border: none; color: #fff; }
+    .overview { background: #0f4b92; border: none; color: #fff; }
     .overview-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     .eyebrow { font-size: 13px; font-weight: 600; opacity: 0.85; }
     .big-pct { font-size: 52px; font-weight: 800; line-height: 1.05; letter-spacing: -1px; }
@@ -253,7 +246,7 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     .schedule-badge.late { color: #fecaca; }
     .schedule-badge.paused, .schedule-badge.upcoming { color: #e2e8f0; }
     .main-bar { position: relative; height: 14px; background: rgba(255,255,255,0.2); border-radius: 999px; margin: 16px 0 14px; }
-    .main-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #a9c238, #c5dc5a); transition: width 0.6s ease; }
+    .main-fill { height: 100%; border-radius: 999px; background: #a9c238; transition: width 0.6s ease; }
     .expected-mark { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; background: #fff; border-radius: 2px; opacity: 0.9; }
     .overview-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; opacity: 0.95; }
     .overview-meta span { display: inline-flex; align-items: center; gap: 6px; }
@@ -272,7 +265,7 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     .stage.pending .stage-name { color: #64748b; }
     .stage-pct { font-size: 13px; font-weight: 700; color: #0f172a; }
     .stage-bar { height: 8px; background: #f1f5f9; border-radius: 999px; margin: 7px 0 5px; overflow: hidden; }
-    .stage-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #0f4b92, #1465c5); transition: width 0.5s ease; }
+    .stage-fill { height: 100%; border-radius: 999px; background: #0f4b92; transition: width 0.5s ease; }
     .stage.done .stage-fill { background: #a9c238; }
     .stage-meta { font-size: 12px; color: #64748b; }
 
@@ -292,7 +285,7 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     .preview { font-size: 13px; color: #475569; }
 
     .btn-primary, .btn-secondary, .btn-ghost, .btn-open { display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; padding: 8px 14px; border: none; text-decoration: none; }
-    .btn-primary { background: linear-gradient(135deg, #0f4b92, #1465c5); color: #fff; }
+    .btn-primary { background: #0f4b92; color: #fff; }
     .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
     .btn-secondary { background: #f1f5f9; color: #334155; }
     .btn-ghost { background: #eef4fc; color: #0f4b92; }
@@ -362,30 +355,8 @@ export class ProjectTrackingComponent {
   revealed = signal(new Set<string>());
   newUpdate = '';
 
-  /** Porcentaje que debería llevar el proyecto hoy si avanzara parejo entre inicio y entrega. */
-  expectedProgress = computed<number | null>(() => {
-    const p = this.project();
-    const start = localDate(p.startDate), end = localDate(p.endDate);
-    const total = daysBetween(start, end);
-    if (total <= 0) return null;
-    const elapsed = Math.min(Math.max(daysBetween(start, today()), 0), total);
-    return Math.round((elapsed / total) * 100);
-  });
-
-  schedule = computed<Schedule>(() => {
-    const p = this.project();
-    const daysLeft = daysBetween(today(), localDate(p.endDate));
-    const daysToStart = daysBetween(today(), localDate(p.startDate));
-    if (p.status === 'completed' || p.progress >= 100) return { tone: 'done', label: 'Completado', detail: 'Proyecto entregado' };
-    if (p.status === 'on_hold') return { tone: 'paused', label: 'En pausa', detail: 'El proyecto está detenido temporalmente' };
-    if (daysToStart > 0) return { tone: 'upcoming', label: 'Por iniciar', detail: `Inicia en ${daysToStart} ${daysToStart === 1 ? 'día' : 'días'}` };
-    if (daysLeft < 0) return { tone: 'late', label: 'Atrasado', detail: `Entrega vencida hace ${-daysLeft} ${daysLeft === -1 ? 'día' : 'días'}` };
-    const left = daysLeft === 0 ? 'La entrega es hoy' : `Faltan ${daysLeft} ${daysLeft === 1 ? 'día' : 'días'}`;
-    const gap = p.progress - (this.expectedProgress() ?? 0);
-    if (gap >= -5) return { tone: 'ok', label: 'A tiempo', detail: left };
-    if (gap >= -15) return { tone: 'risk', label: 'En riesgo', detail: left };
-    return { tone: 'late', label: 'Atrasado', detail: left };
-  });
+  expectedProgress = computed(() => expectedProgress(this.project()));
+  schedule = computed(() => projectSchedule(this.project()));
 
   // Método y no computed: ngModel muta las etapas del borrador sin emitir en la signal.
   draftAverage(): number {

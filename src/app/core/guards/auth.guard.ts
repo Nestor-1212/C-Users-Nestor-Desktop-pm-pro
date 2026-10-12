@@ -10,7 +10,7 @@ export const authGuard: CanActivateFn = () => {
   return false;
 };
 
-/** Dashboard y facturación no son para el técnico: su punto de entrada son los tickets. */
+/** El dashboard no es para el técnico: su punto de entrada son los tickets. */
 export const notTechnicianGuard: CanActivateFn = () => {
   const auth = inject(AuthService);
   const router = inject(Router);

@@ -6,8 +6,11 @@ import { API_URL } from '../config/api.config';
 import { toTicket, upper, upsert } from '../http/mappers';
 import { CompanyService } from './company.service';
 
-/** Solo para mostrar el SLA esperado antes de crear el ticket; el plazo real lo calcula el servidor. */
-const SLA_HOURS_BY_PLAN: Record<CompanyPlan, number> = { Premium: 4, Standard: 12, Basic: 24 };
+/**
+ * Horas de respuesta según el nivel de servicio de la empresa (campo "plan" en la API).
+ * Solo para mostrarlo; el plazo real lo calcula el servidor.
+ */
+export const SLA_HOURS_BY_PLAN: Record<CompanyPlan, number> = { Premium: 4, Standard: 12, Basic: 24 };
 
 export interface TicketInput {
   title: string;

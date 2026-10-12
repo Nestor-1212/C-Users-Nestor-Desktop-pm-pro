@@ -146,11 +146,11 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
                 <p class="unassigned">{{ auth.isClient() ? 'Pronto un especialista de 3TECH tomará tu ticket.' : 'Nadie lo ha tomado todavía.' }}</p>
               }
               @if (auth.isOwner()) {
-                <label class="assign-label" for="ticket-assignee">Asignar a</label>
+                <label class="assign-label" for="ticket-assignee">Asignar a un técnico</label>
                 <select id="ticket-assignee" class="assign-select" (change)="assign($any($event.target).value || null)">
                   <option value="" [selected]="!ticket()!.assignedTo">Sin asignar</option>
                   @for (m of userService.staff(); track m.id) {
-                    <option [value]="m.id" [selected]="ticket()!.assignedTo?.id === m.id">{{ m.name }}{{ m.role === 'owner' ? ' (Administrador)' : '' }}</option>
+                    <option [value]="m.id" [selected]="ticket()!.assignedTo?.id === m.id">{{ m.name }}</option>
                   }
                 </select>
               } @else if (auth.isTechnician()) {
@@ -314,8 +314,8 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
     .thread { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
     .response-bubble { display: flex; gap: 12px; }
     .response-bubble.owner-response { flex-direction: row-reverse; }
-    .response-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--gradient-primary, linear-gradient(135deg, #0f4b92, #1465c5)); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
-    .owner-response .response-avatar { background: linear-gradient(135deg, #10b981, #059669); }
+    .response-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--gradient-primary, #0f4b92); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+    .owner-response .response-avatar { background: #e99d34; }
     .response-content { max-width: 75%; }
     .response-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
     .response-author { font-size: 13px; font-weight: 700; color: #0f172a; }
@@ -361,7 +361,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
     .assign-label { display: block; font-size: 12px; font-weight: 600; color: #64748b; margin: 12px 0 5px; }
     .assign-select { width: 100%; padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13.5px; font-family: inherit; background: #fff; }
     .btn-take, .btn-release { margin-top: 12px; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 10px; padding: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
-    .btn-take { background: linear-gradient(135deg, #0f4b92, #1465c5); color: #fff; }
+    .btn-take { background: #0f4b92; color: #fff; }
     .btn-release { background: #f1f5f9; color: #475569; }
     .side-card.sla-danger { border-color: #fca5a5; background: #fff8f8; }
     .side-card h4 { font-size: 14px; font-weight: 700; color: #0f172a; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9; }

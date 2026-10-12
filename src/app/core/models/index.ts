@@ -163,28 +163,20 @@ export interface TicketResponse {
   attachments?: TicketAttachment[];
 }
 
+export type ActivityKind = 'create' | 'update' | 'delete' | 'status' | 'assign' | 'comment' | 'access' | 'security';
+export type ActivityEntity = 'company' | 'user' | 'project' | 'ticket' | 'invoice';
+
 export interface ActivityLogEntry {
   id: string;
   actorId: string;
   actorName: string;
-  entityType: 'company' | 'user' | 'project' | 'ticket' | 'invoice';
+  /** Rol de quien actuó; vacío en intentos de acceso con usuarios inexistentes. */
+  actorRole?: 'owner' | 'technician' | 'client';
+  entityType: ActivityEntity;
   entityId: string;
   description: string;
-  createdAt: string;
-}
-
-export interface Invoice {
-  id: string;
-  companyId: string;
-  companyName: string;
-  concept: string;
-  amount: number;
-  issueDate: string;
-  dueDate: string;
-  status: 'pending' | 'paid';
-  /** Calculado por el servidor con la zona horaria del negocio. */
-  overdue: boolean;
-  paidAt?: string;
+  kind: ActivityKind;
+  ip?: string;
   createdAt: string;
 }
 
@@ -219,6 +211,7 @@ export interface Ticket {
   satisfactionComment?: string;
   ratedAt?: string;
   /** Persona de la empresa que lo creó. */
+  createdById?: string;
   createdByName?: string;
   /** Persona de 3TECH a cargo (administrador o técnico). */
   assignedTo?: StaffMember;

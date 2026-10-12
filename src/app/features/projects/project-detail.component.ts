@@ -291,7 +291,7 @@ import { ProjectScheduleComponent } from './project-schedule.component';
 
     .tabs-nav { display: flex; gap: 4px; background: white; border-radius: 14px; padding: 6px; margin-bottom: 16px; border: 1px solid #e2e8f0; }
     .tab-btn { flex: 1; padding: 10px 16px; border: none; border-radius: 10px; background: transparent; color: #64748b; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
-    .tab-btn.active { background: var(--gradient-primary, linear-gradient(135deg, #0f4b92, #1465c5)); color: white; font-weight: 600; }
+    .tab-btn.active { background: var(--gradient-primary, #0f4b92); color: white; font-weight: 600; }
     .tab-btn:hover:not(.active) { background: #f1f5f9; }
     .tab-count { background: rgba(0,0,0,0.1); border-radius: 10px; padding: 1px 7px; font-size: 11px; }
     .tab-btn.active .tab-count { background: rgba(255,255,255,0.25); }
@@ -302,8 +302,8 @@ import { ProjectScheduleComponent } from './project-schedule.component';
     .comments-thread { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
     .comment-bubble { display: flex; gap: 12px; }
     .comment-bubble.owner-bubble { flex-direction: row-reverse; }
-    .comment-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--gradient-primary, linear-gradient(135deg, #0f4b92, #1465c5)); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
-    .comment-bubble.owner-bubble .comment-avatar { background: linear-gradient(135deg, #059669, #10b981); }
+    .comment-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--gradient-primary, #0f4b92); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+    .comment-bubble.owner-bubble .comment-avatar { background: #e99d34; }
     .comment-body { max-width: 70%; }
     .comment-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
     .comment-author { font-size: 13px; font-weight: 700; color: #0f172a; }

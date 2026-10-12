@@ -284,7 +284,7 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
     .empty { color: #64748b; text-align: center; padding: 28px 12px; margin: 0; font-size: 14px; }
 
     /* Archivo */
-    .file-card { display: flex; align-items: center; gap: 14px; background: linear-gradient(135deg, #0f4b92, #1465c5); color: #fff; border-radius: 16px; padding: 16px 20px; flex-wrap: wrap; }
+    .file-card { display: flex; align-items: center; gap: 14px; background: #0f4b92; color: #fff; border-radius: 16px; padding: 16px 20px; flex-wrap: wrap; }
     .file-icon { width: 44px; height: 44px; border-radius: 12px; background: rgba(255,255,255,0.16); display: flex; align-items: center; justify-content: center; }
     .file-info { flex: 1; min-width: 180px; display: flex; flex-direction: column; }
     .file-title { font-weight: 700; font-size: 15px; }
@@ -299,7 +299,7 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
     .zoom button { border: none; background: none; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; }
     .zoom button.active { background: #fff; color: #0f4b92; box-shadow: 0 1px 3px rgba(15,23,42,0.1); }
     .btn-primary, .btn-secondary, .btn-ghost, .btn-danger { display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; padding: 8px 13px; border: none; }
-    .btn-primary { background: linear-gradient(135deg, #0f4b92, #1465c5); color: #fff; }
+    .btn-primary { background: #0f4b92; color: #fff; }
     .btn-primary:disabled, .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-secondary { background: #f1f5f9; color: #334155; }
     .btn-ghost { background: #eef4fc; color: #0f4b92; }

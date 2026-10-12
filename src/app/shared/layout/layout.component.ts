@@ -82,12 +82,6 @@ import { IconComponent } from '../icon/icon.component';
             </span>
             <span class="nav-label">Tickets</span>
           </a>
-          @if (!auth.isTechnician()) {
-            <a routerLink="/billing" routerLinkActive="active" class="nav-item" aria-label="Facturación" (click)="mobileOpen.set(false)">
-              <span class="nav-icon-wrap"><app-icon name="dollar-sign" [size]="18" class="nav-icon" /></span>
-              <span class="nav-label">{{ auth.isOwner() ? 'Facturación' : 'Mis Facturas' }}</span>
-            </a>
-          }
         </nav>
 
         <div class="sidebar-footer">
@@ -238,7 +232,7 @@ import { IconComponent } from '../icon/icon.component';
     }
     .user-avatar {
       width: 38px; height: 38px; border-radius: 50%;
-      background: linear-gradient(135deg, var(--color-primary-500, #1465c5), var(--color-brand-green, #a9c238));
+      background: var(--color-brand-orange, #e99d34);
       display: flex; align-items: center; justify-content: center;
       font-weight: 700; font-size: 14px; color: white; flex-shrink: 0;
     }
@@ -327,7 +321,7 @@ import { IconComponent } from '../icon/icon.component';
     .top-user { font-size: 14px; color: #475569; font-weight: 500; }
     .user-avatar-sm {
       width: 34px; height: 34px; border-radius: 50%;
-      background: linear-gradient(135deg, var(--color-primary-500, #1465c5), var(--color-brand-green, #a9c238));
+      background: var(--color-primary-700, #0f4b92);
       display: flex; align-items: center; justify-content: center;
       font-weight: 700; font-size: 12px; color: white; flex-shrink: 0;
     }
@@ -418,7 +412,7 @@ export class LayoutComponent {
       .pipe(filter(e => e instanceof NavigationEnd), takeUntilDestroyed())
       .subscribe(() => this.updatePageTitle());
 
-    // Datos comunes a toda la app: campana, contador de tickets abiertos y, para clientes, su empresa (logo, plan).
+    // Datos comunes a toda la app: campana, contador de tickets abiertos y, para clientes, su empresa (logo, tiempo de respuesta).
     loadPageData(this.notify, this.notificationCenter.load(), this.ticketService.load(), this.companyService.load());
     // Refresco periódico silencioso: refleja acciones de otros usuarios sin recargar la página.
     interval(LayoutComponent.NOTIFICATIONS_REFRESH_MS)

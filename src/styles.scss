@@ -16,8 +16,9 @@
   --color-primary-50: #e8f1fd;
   --color-brand-green: #a9c238;
   --color-brand-orange: #e99d34;
-  --gradient-primary: linear-gradient(135deg, var(--color-primary-700), var(--color-primary-500));
-  --gradient-brand: linear-gradient(135deg, var(--color-primary-900), var(--color-primary-800));
+  /* Colores sólidos de marca (antes degradados); se conservan los nombres porque muchos estilos los usan. */
+  --gradient-primary: var(--color-primary-700);
+  --gradient-brand: var(--color-primary-900);
 
   /* Texto (AA-safe salvo donde se indique lo contrario) */
   --color-text: #0f172a;

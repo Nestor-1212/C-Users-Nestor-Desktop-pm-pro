@@ -163,7 +163,7 @@ function span(ms: number): string {
                     </span>
                     <span class="g-info">
                       <span class="g-name">{{ g.name }}</span>
-                      <span class="g-plan">Plan {{ g.plan }} · SLA {{ g.slaHours }} h</span>
+                      <span class="g-plan">Tiempo de respuesta: {{ g.slaHours }} h</span>
                     </span>
                     <span class="g-counters">
                       @if (g.breached) { <span class="gc red">{{ g.breached }} vencido{{ g.breached > 1 ? 's' : '' }}</span> }
@@ -365,7 +365,7 @@ function span(ms: number): string {
             </div>
             <div class="sla-info">
               <app-icon name="clock" [size]="16" />
-              <span>Tiempo de respuesta garantizado: <strong>{{ mySlaHours() }} horas</strong> desde la creación (plan {{ myPlan() }}).</span>
+              <span>Tiempo de respuesta garantizado: <strong>{{ mySlaHours() }} horas</strong> desde la creación.</span>
             </div>
             <div class="modal-footer">
               @if (form.invalid) { <span class="form-hint">Completa los campos obligatorios (*)</span> }
@@ -443,7 +443,7 @@ function span(ms: number): string {
     .group { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; }
     .group.has-breach { border-color: #fca5a5; }
     .group-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #fbfcfe; border: none; border-bottom: 1px solid #eef2f7; cursor: pointer; text-align: left; font-family: inherit; }
-    .logo { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, #0f4b92, #1465c5); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; overflow: hidden; flex-shrink: 0; }
+    .logo { width: 36px; height: 36px; border-radius: 10px; background: #0f4b92; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; overflow: hidden; flex-shrink: 0; }
     .logo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
     .g-info { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     .g-name { font-size: 15px; font-weight: 800; color: #0f172a; }
@@ -583,7 +583,6 @@ export class TicketsComponent {
     const user = this.auth.currentUser();
     return user?.companyId ? this.companyService.getById(user.companyId) : undefined;
   });
-  myPlan = computed(() => this.myCompany()?.plan || 'Standard');
   mySlaHours = computed(() => {
     const user = this.auth.currentUser();
     return user?.companyId ? this.ticketService.getSlaHoursForCompany(user.companyId) : 24;
@@ -652,7 +651,7 @@ export class TicketsComponent {
     const sections: { key: string; title: string; hint: string; icon: IconName; tickets: Ticket[] }[] = [
       { key: 'answered', title: 'Te respondimos, revisa', hint: 'El equipo de 3TECH ya contestó; revisa la respuesta o confírmanos si quedó resuelto.', icon: 'message-circle',
         tickets: list.filter(t => !isClosed(t) && t.lastResponse?.authorRole === 'owner') },
-      { key: 'waiting', title: 'Esperando respuesta de 3TECH', hint: 'Estamos trabajando en ellos dentro del tiempo de tu plan.', icon: 'clock',
+      { key: 'waiting', title: 'Esperando respuesta de 3TECH', hint: 'Estamos trabajando en ellos dentro de tu tiempo de respuesta garantizado.', icon: 'clock',
         tickets: list.filter(t => !isClosed(t) && t.lastResponse?.authorRole !== 'owner') },
       { key: 'done', title: 'Resueltos', hint: 'Si aún no lo hiciste, califica la atención que recibiste.', icon: 'check',
         tickets: list.filter(isClosed).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) },

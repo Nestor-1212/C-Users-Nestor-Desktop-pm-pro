@@ -111,14 +111,12 @@ import { IconComponent } from '../../shared/icon/icon.component';
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 20px; padding: 32px 20px; box-sizing: border-box;
       font-family: 'Inter', sans-serif;
-      background:
-        radial-gradient(circle at 15% 20%, var(--color-primary-500, #1465c5) 0%, transparent 45%),
-        radial-gradient(circle at 85% 85%, var(--color-primary-700, #0f4b92) 0%, transparent 50%),
-        linear-gradient(160deg, #0a1328 0%, var(--color-primary-900, #092f5b) 45%, var(--color-primary-700, #0f4b92) 100%);
+      background: var(--color-primary-700, #0f4b92);
     }
 
     /* ---------- Decorative backdrop ---------- */
-    .bg-decor { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+    /* Fondo sólido: sin orbes difuminados ni tramas que se vean como degradado. */
+    .bg-decor { display: none; }
     .grid-overlay {
       position: absolute; inset: 0;
       background-image: radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px);
@@ -194,14 +192,13 @@ import { IconComponent } from '../../shared/icon/icon.component';
 
     .btn-login {
       width: 100%; padding: 13px; margin-top: 4px;
-      background: linear-gradient(135deg, #0a2f66, #0F4B92 55%, #1768c7);
-      background-size: 170% 170%; background-position: 0% 50%;
+      background: #0F4B92;
       color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 700;
-      cursor: pointer; transition: background-position 0.4s, transform 0.1s, box-shadow 0.2s;
+      cursor: pointer; transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
       box-shadow: 0 10px 24px -8px rgba(15,75,146,0.55);
       display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     }
-    .btn-login:hover:not(:disabled) { background-position: 100% 50%; transform: translateY(-1px); }
+    .btn-login:hover:not(:disabled) { background: #0c3d78; transform: translateY(-1px); }
     .btn-login:disabled { opacity: 0.7; cursor: not-allowed; }
     .spin { display: inline-flex; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
