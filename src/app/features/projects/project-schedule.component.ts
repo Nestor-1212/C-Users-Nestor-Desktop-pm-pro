@@ -322,7 +322,8 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
     .form-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: #475569; }
     .form-grid .wide { grid-column: 1 / -1; }
     .form-grid .check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
-    .form-grid input:not([type=checkbox]):not([type=range]), .form-grid select { padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13.5px; font-family: inherit; outline: none; background: #fff; }
+    .form-grid input:not([type=checkbox]):not([type=range]) { padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13.5px; font-family: inherit; outline: none; background: #fff; }
+    .form-grid select { padding: 8px 10px; font-size: 13.5px; font-family: inherit; }
     .form-grid input[type=range] { accent-color: #0f4b92; }
     .form-actions { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
 

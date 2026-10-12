@@ -294,8 +294,9 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group.full { grid-column: 1/-1; }
     label { font-size: 13px; font-weight: 600; color: #374151; }
-    input, select, textarea { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; resize: vertical; }
-    input:focus, select:focus, textarea:focus { border-color: var(--color-primary-500, #1465c5); }
+    .modal-body input, .modal-body textarea { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; resize: vertical; }
+    .modal-body select { padding: 10px 12px; font-size: 14px; width: 100%; box-sizing: border-box; font-family: inherit; }
+    .modal-body input:focus, .modal-body textarea:focus { border-color: var(--color-primary-500, #1465c5); }
 
     @media (max-width: 768px) {
       .project-card { flex-direction: column; }

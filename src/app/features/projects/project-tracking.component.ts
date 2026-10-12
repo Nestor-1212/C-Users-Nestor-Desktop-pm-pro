@@ -278,8 +278,9 @@ const emptyLink = (): ProjectLinkInput => ({ label: '', url: '', type: 'staging'
     .pct-edit input[type=range] { flex: 1; accent-color: #0f4b92; }
     .pct-num { width: 58px; }
 
-    input, select, textarea { padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13.5px; font-family: inherit; outline: none; box-sizing: border-box; min-width: 0; }
-    input:focus, select:focus, textarea:focus { border-color: #1465c5; }
+    input, textarea { padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13.5px; font-family: inherit; outline: none; box-sizing: border-box; min-width: 0; }
+    select { padding: 8px 10px; font-size: 13.5px; font-family: inherit; box-sizing: border-box; min-width: 0; }
+    input:focus, textarea:focus { border-color: #1465c5; }
     .editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
     .spacer { flex: 1; }
     .preview { font-size: 13px; color: #475569; }

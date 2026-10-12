@@ -344,8 +344,9 @@ function generatePassword(): string {
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group.full { grid-column: 1/-1; }
     label { font-size: 13px; font-weight: 600; color: #374151; }
-    input, select { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; }
-    input:focus, select:focus { border-color: #0f4b92; }
+    .modal-body input { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; }
+    .modal-body select { padding: 10px 12px; font-size: 14px; width: 100%; box-sizing: border-box; font-family: inherit; }
+    .modal-body input:focus { border-color: #0f4b92; }
     .pass-row { display: flex; gap: 6px; align-items: center; }
     .pass-row input { flex: 1; }
     .pass-row .btn-icon { height: 40px; width: 40px; }

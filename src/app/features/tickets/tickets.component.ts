@@ -491,7 +491,7 @@ function span(ms: number): string {
     .t-table .cell-title { font-weight: 700; color: #0f172a; white-space: normal; min-width: 220px; }
     .muted { color: #64748b; }
     .prio-pill { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: var(--prio); background: color-mix(in srgb, var(--prio) 14%, white); }
-    .status-select { border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 4px 6px; font-size: 12.5px; font-weight: 600; font-family: inherit; background: #fff; cursor: pointer; }
+    .status-select { padding: 4px 6px; font-size: 12.5px; font-weight: 600; font-family: inherit; }
     .t-table .table-empty { text-align: center; color: #64748b; padding: 24px; }
 
     /* Cliente */
@@ -505,8 +505,9 @@ function span(ms: number): string {
 
     .form-group { margin-bottom: 16px; }
     .form-group label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
-    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box; font-family: inherit; resize: vertical; }
-    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--color-primary-500, #1465c5); }
+    .form-group input, .form-group textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box; font-family: inherit; resize: vertical; }
+    .form-group select { width: 100%; padding: 10px 12px; font-size: 14px; box-sizing: border-box; font-family: inherit; }
+    .form-group input:focus, .form-group textarea:focus { border-color: var(--color-primary-500, #1465c5); }
     .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .sla-info { display: flex; gap: 8px; align-items: center; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 10px 14px; font-size: 13px; color: #1d4ed8; margin-top: 4px; }
 

@@ -282,8 +282,9 @@ import { ProjectScheduleComponent } from './project-schedule.component';
     .progress-lbl { font-size: 12px; color: #64748b; font-weight: 500; }
     .status-update { display: flex; flex-direction: column; gap: 6px; width: 100%; }
     .status-update label { font-size: 12px; color: #64748b; font-weight: 600; }
-    .status-update select, .status-update input { padding: 6px 10px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 13px; outline: none; width: 100%; box-sizing: border-box; }
-    .status-update select:focus, .status-update input:focus { border-color: var(--color-primary-500, #1465c5); }
+    .status-update input { padding: 6px 10px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 13px; outline: none; width: 100%; box-sizing: border-box; }
+    .status-update select { padding: 6px 10px; font-size: 13px; width: 100%; box-sizing: border-box; }
+    .status-update input:focus { border-color: var(--color-primary-500, #1465c5); }
 
     .internal-notes { background: #fef9e7; border: 1px solid #fde68a; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; display: flex; gap: 10px; align-items: flex-start; }
     .internal-badge { display: inline-flex; align-items: center; gap: 4px; background: #f59e0b; color: white; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; white-space: nowrap; }

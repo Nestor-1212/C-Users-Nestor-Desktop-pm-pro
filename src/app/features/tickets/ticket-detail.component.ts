@@ -359,7 +359,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
     .assignee-info span { font-size: 12px; color: #64748b; }
     .unassigned { font-size: 13px; color: #64748b; margin: 0; }
     .assign-label { display: block; font-size: 12px; font-weight: 600; color: #64748b; margin: 12px 0 5px; }
-    .assign-select { width: 100%; padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13.5px; font-family: inherit; background: #fff; }
+    .assign-select { width: 100%; padding: 8px 10px; font-size: 13.5px; font-family: inherit; }
     .btn-take, .btn-release { margin-top: 12px; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 10px; padding: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
     .btn-take { background: #0f4b92; color: #fff; }
     .btn-release { background: #f1f5f9; color: #475569; }

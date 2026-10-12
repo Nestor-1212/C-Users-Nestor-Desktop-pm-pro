@@ -420,8 +420,9 @@ const SLA_OPTIONS: { value: CompanyPlan; hours: number; hint: string }[] = [
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group.full { grid-column: 1/-1; }
     label, .field-label { font-size: 13px; font-weight: 600; color: #374151; }
-    input[type=text], input[type=email], select { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; }
-    input:focus, select:focus { border-color: #0f4b92; }
+    .modal-body input[type=text], .modal-body input[type=email] { padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; font-family: inherit; }
+    .modal-body select { padding: 10px 12px; font-size: 14px; width: 100%; box-sizing: border-box; font-family: inherit; }
+    .modal-body input:focus { border-color: #0f4b92; }
     .sla-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .sla-picker button { border: 1.5px solid #e2e8f0; background: #fff; border-radius: 12px; padding: 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; font-family: inherit; }
     .sla-picker strong { font-size: 18px; color: #0f172a; }
