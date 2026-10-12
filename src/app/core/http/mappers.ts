@@ -1,6 +1,6 @@
 import {
   ActivityLogEntry, AppNotification, Company, CompanyPlan, Invoice, Project, ProjectComment,
-  ProjectDocument, ProjectRequirement, Ticket, TicketAttachment, TicketResponse, User,
+  ProjectDocument, ProjectLink, ProjectRequirement, ProjectStage, ProjectTask, ProjectUpdate, Ticket, TicketAttachment, TicketResponse, User,
 } from '../models';
 import { fileUrl } from '../config/api.config';
 
@@ -13,6 +13,11 @@ import { fileUrl } from '../config/api.config';
 type Api = any;
 
 const lower = <T extends string>(v: string) => v.toLowerCase() as T;
+/**
+ * En conversaciones (comentarios, respuestas) solo importa de qué lado habla
+ * el autor: el técnico escribe como parte de 3TECH, igual que el administrador.
+ */
+const side = (role: string): 'owner' | 'client' => (role === 'CLIENT' ? 'client' : 'owner');
 export const upper = (v: string) => v.toUpperCase();
 const dateOnly = (iso: string) => iso.slice(0, 10);
 const opt = <T>(v: T | null | undefined): T | undefined => v ?? undefined;
@@ -36,7 +41,7 @@ export function toCompany(c: Api): Company {
 function toComment(c: Api): ProjectComment {
   return {
     id: c.id, projectId: c.projectId, authorId: c.authorId, authorName: c.authorName,
-    authorRole: lower(c.authorRole), content: c.content, isInternal: c.isInternal, createdAt: c.createdAt,
+    authorRole: side(c.authorRole), content: c.content, isInternal: c.isInternal, createdAt: c.createdAt,
   };
 }
 
@@ -50,8 +55,35 @@ function toRequirement(r: Api): ProjectRequirement {
 function toDocument(d: Api): ProjectDocument {
   return {
     id: d.id, projectId: d.projectId, name: d.name, type: extension(d.name), size: d.size,
-    uploadedBy: d.uploadedBy, uploadedAt: d.uploadedAt, url: fileUrl(d.filePath)!,
+    uploadedBy: d.uploadedBy, uploadedAt: d.uploadedAt, url: fileUrl(d.filePath)!, isSchedule: !!d.isSchedule,
   };
+}
+
+function toStage(s: Api): ProjectStage {
+  return {
+    id: s.id, name: s.name, progress: s.progress,
+    startDate: s.startDate ? dateOnly(s.startDate) : undefined,
+    endDate: s.endDate ? dateOnly(s.endDate) : undefined,
+  };
+}
+
+function toTask(t: Api): ProjectTask {
+  return {
+    id: t.id, stageId: t.stageId, name: t.name,
+    startDate: dateOnly(t.startDate), endDate: dateOnly(t.endDate), progress: t.progress,
+    owner: lower(t.owner), isMilestone: t.isMilestone, visibleToClient: t.visibleToClient, position: t.position,
+  };
+}
+
+function toLink(l: Api): ProjectLink {
+  return {
+    id: l.id, label: l.label, url: l.url, type: lower(l.type),
+    username: opt(l.username), password: opt(l.password), updatedAt: l.updatedAt,
+  };
+}
+
+function toUpdate(u: Api): ProjectUpdate {
+  return { id: u.id, content: u.content, authorName: u.authorName, createdAt: u.createdAt };
 }
 
 /** Sirve para la lista (sin detalle) y para el detalle (con comentarios, requerimientos y documentos). */
@@ -64,6 +96,7 @@ export function toProject(p: Api): Project {
     startDate: dateOnly(p.startDate), endDate: dateOnly(p.endDate),
     budget: p.budget != null ? Number(p.budget) : undefined,
     internalNotes: opt(p.internalNotes), tags: p.tags ?? [],
+    scheduleVisibility: lower(p.scheduleVisibility ?? 'FULL'),
     createdAt: p.createdAt, updatedAt: p.updatedAt,
     commentCount: p.comments?.length ?? 0,
     requirementCount: isDetail ? p.requirements.length : (p._count?.requirements ?? 0),
@@ -71,6 +104,10 @@ export function toProject(p: Api): Project {
     comments,
     requirements: isDetail ? (p.requirements as Api[]).map(toRequirement) : [],
     documents: isDetail ? (p.documents as Api[]).map(toDocument) : [],
+    stages: (p.stages ?? []).map(toStage),
+    tasks: (p.tasks ?? []).map(toTask),
+    links: (p.links ?? []).map(toLink),
+    updates: (p.updates ?? []).map(toUpdate),
   };
 }
 
@@ -81,7 +118,7 @@ function toAttachment(a: Api): TicketAttachment {
 function toResponse(r: Api): TicketResponse {
   return {
     id: r.id, ticketId: r.ticketId, authorId: r.authorId, authorName: r.authorName,
-    authorRole: lower(r.authorRole), content: r.content, createdAt: r.createdAt,
+    authorRole: side(r.authorRole), content: r.content, createdAt: r.createdAt,
     attachments: (r.attachments ?? []).map(toAttachment),
   };
 }
@@ -100,6 +137,14 @@ export function toTicket(t: Api): Ticket {
     satisfactionRating: opt(t.satisfactionRating),
     satisfactionComment: opt(t.satisfactionComment),
     ratedAt: opt(t.ratedAt),
+    createdByName: opt(t.createdByName),
+    assignedTo: t.assignedTo ? { id: t.assignedTo.id, name: t.assignedTo.name, role: lower(t.assignedTo.role) } : undefined,
+    resolvedByName: opt(t.resolvedByName),
+    lastResponse: t.lastResponse
+      ? { authorName: t.lastResponse.authorName, authorRole: side(t.lastResponse.authorRole), createdAt: t.lastResponse.createdAt }
+      : responses.length
+        ? { authorName: responses[responses.length - 1].authorName, authorRole: responses[responses.length - 1].authorRole, createdAt: responses[responses.length - 1].createdAt }
+        : undefined,
   };
 }
 

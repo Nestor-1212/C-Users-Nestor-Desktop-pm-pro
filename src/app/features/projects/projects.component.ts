@@ -24,8 +24,8 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
     <div class="projects-page">
       <div class="page-header">
         <div>
-          <h1>{{ auth.isOwner() ? 'Todos los Proyectos' : 'Mis Proyectos' }}</h1>
-          <p>{{ auth.isOwner() ? 'Gestiona y supervisa todos los proyectos de clientes' : 'Visualiza el avance de tus proyectos' }}</p>
+          <h1>{{ auth.isStaff() ? 'Todos los Proyectos' : 'Mis Proyectos' }}</h1>
+          <p>{{ auth.isStaff() ? 'Gestiona y supervisa todos los proyectos de clientes' : 'Visualiza el avance de tus proyectos' }}</p>
         </div>
         <div class="header-actions">
           <app-export-menu (formatSelected)="exportProjects($event)" />
@@ -326,7 +326,7 @@ export class ProjectsComponent {
   allCompanies = this.companyService.companies;
 
   constructor() {
-    loadPageData(this.notify, this.projectService.load(), ...(this.auth.isOwner() ? [this.companyService.load()] : []));
+    loadPageData(this.notify, this.projectService.load(), ...(this.auth.isStaff() ? [this.companyService.load()] : []));
   }
 
   form = this.fb.group({

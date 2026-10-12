@@ -1,7 +1,14 @@
+/** Integrante del equipo de 3TECH al que se le pueden asignar tickets. */
+export interface StaffMember {
+  id: string;
+  name: string;
+  role: 'owner' | 'technician';
+}
+
 export interface User {
   id: string;
   username: string;
-  role: 'owner' | 'client';
+  role: 'owner' | 'technician' | 'client';
   companyId?: string;
   name: string;
   email: string;
@@ -56,6 +63,8 @@ export interface ProjectDocument {
   uploadedBy: string;
   uploadedAt: string;
   url: string;
+  /** Archivo de cronograma destacado en la pestaña Cronograma. */
+  isSchedule: boolean;
 }
 
 export interface Project {
@@ -71,6 +80,7 @@ export interface Project {
   budget?: number;
   internalNotes?: string;
   tags?: string[];
+  scheduleVisibility: ScheduleVisibility;
   createdAt: string;
   updatedAt: string;
   /** Contadores: la lista de la API no trae los arreglos completos (solo el detalle). */
@@ -80,6 +90,55 @@ export interface Project {
   comments: ProjectComment[];
   requirements: ProjectRequirement[];
   documents: ProjectDocument[];
+  /** Seguimiento para el cliente (solo viene en el detalle). */
+  stages: ProjectStage[];
+  tasks: ProjectTask[];
+  links: ProjectLink[];
+  updates: ProjectUpdate[];
+}
+
+export interface ProjectStage {
+  id?: string;
+  name: string;
+  progress: number;
+  startDate?: string;
+  endDate?: string;
+}
+
+/** Cuánto del cronograma ve el cliente: nada, solo etapas, etapas + hitos, o todo. */
+export type ScheduleVisibility = 'hidden' | 'stages' | 'milestones' | 'full';
+export type TaskOwner = 'team' | 'client';
+
+export interface ProjectTask {
+  id: string;
+  stageId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  progress: number;
+  owner: TaskOwner;
+  isMilestone: boolean;
+  visibleToClient: boolean;
+  position: number;
+}
+
+export type ProjectLinkType = 'staging' | 'production' | 'design' | 'video' | 'other';
+
+export interface ProjectLink {
+  id: string;
+  label: string;
+  url: string;
+  type: ProjectLinkType;
+  username?: string;
+  password?: string;
+  updatedAt: string;
+}
+
+export interface ProjectUpdate {
+  id: string;
+  content: string;
+  authorName: string;
+  createdAt: string;
 }
 
 export type TicketStatus = 'open' | 'in_review' | 'resolved' | 'escalated' | 'closed';
@@ -159,4 +218,12 @@ export interface Ticket {
   satisfactionRating?: number;
   satisfactionComment?: string;
   ratedAt?: string;
+  /** Persona de la empresa que lo creó. */
+  createdByName?: string;
+  /** Persona de 3TECH a cargo (administrador o técnico). */
+  assignedTo?: StaffMember;
+  /** Quién lo marcó como resuelto/cerrado. */
+  resolvedByName?: string;
+  /** Última respuesta (viene en la lista): indica de quién es el turno. */
+  lastResponse?: { authorName: string; authorRole: 'owner' | 'client'; createdAt: string };
 }

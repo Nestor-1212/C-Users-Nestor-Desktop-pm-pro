@@ -22,6 +22,9 @@ export class AuthService {
   isLoggedIn = computed(() => !!this._session());
   isOwner = computed(() => this.currentUser()?.role === 'owner');
   isClient = computed(() => this.currentUser()?.role === 'client');
+  isTechnician = computed(() => this.currentUser()?.role === 'technician');
+  /** Equipo de 3TECH (administrador o técnico): trabaja tickets y proyectos. */
+  isStaff = computed(() => this.isOwner() || this.isTechnician());
 
   constructor() {
     LEGACY_KEYS.forEach(k => { this.storage.remove(k); this.storage.removeSession(k); });

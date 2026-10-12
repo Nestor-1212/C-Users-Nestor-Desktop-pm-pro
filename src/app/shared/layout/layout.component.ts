@@ -38,15 +38,17 @@ import { IconComponent } from '../icon/icon.component';
           <div class="user-avatar">{{ userInitials() }}</div>
           <div class="user-info">
             <span class="user-name">{{ auth.currentUser()?.name }}</span>
-            <span class="user-role">{{ auth.isOwner() ? 'Administrador' : 'Empresa Cliente' }}</span>
+            <span class="user-role">{{ auth.isOwner() ? 'Administrador' : auth.isTechnician() ? 'Técnico 3TECH' : 'Empresa Cliente' }}</span>
           </div>
         </div>
 
         <nav class="sidebar-nav" aria-label="Navegación principal">
-          <a routerLink="/dashboard" routerLinkActive="active" class="nav-item" aria-label="Dashboard" (click)="mobileOpen.set(false)">
-            <span class="nav-icon-wrap"><app-icon name="chart" [size]="18" class="nav-icon" /></span>
-            <span class="nav-label">Dashboard</span>
-          </a>
+          @if (!auth.isTechnician()) {
+            <a routerLink="/dashboard" routerLinkActive="active" class="nav-item" aria-label="Dashboard" (click)="mobileOpen.set(false)">
+              <span class="nav-icon-wrap"><app-icon name="chart" [size]="18" class="nav-icon" /></span>
+              <span class="nav-label">Dashboard</span>
+            </a>
+          }
           @if (auth.isOwner()) {
             <a routerLink="/companies" routerLinkActive="active" class="nav-item" aria-label="Empresas" (click)="mobileOpen.set(false)">
               <span class="nav-icon-wrap"><app-icon name="building" [size]="18" class="nav-icon" /></span>
@@ -80,10 +82,12 @@ import { IconComponent } from '../icon/icon.component';
             </span>
             <span class="nav-label">Tickets</span>
           </a>
-          <a routerLink="/billing" routerLinkActive="active" class="nav-item" aria-label="Facturación" (click)="mobileOpen.set(false)">
-            <span class="nav-icon-wrap"><app-icon name="dollar-sign" [size]="18" class="nav-icon" /></span>
-            <span class="nav-label">{{ auth.isOwner() ? 'Facturación' : 'Mis Facturas' }}</span>
-          </a>
+          @if (!auth.isTechnician()) {
+            <a routerLink="/billing" routerLinkActive="active" class="nav-item" aria-label="Facturación" (click)="mobileOpen.set(false)">
+              <span class="nav-icon-wrap"><app-icon name="dollar-sign" [size]="18" class="nav-icon" /></span>
+              <span class="nav-label">{{ auth.isOwner() ? 'Facturación' : 'Mis Facturas' }}</span>
+            </a>
+          }
         </nav>
 
         <div class="sidebar-footer">
@@ -466,6 +470,10 @@ export class LayoutComponent {
     const user = this.auth.currentUser();
     if (!user) return 0;
     const tickets = this.ticketService.getAll();
+    if (user.role === 'technician') {
+      // Lo que le toca: sus tickets abiertos más los que nadie ha tomado.
+      return tickets.filter(t => t.status === 'open' && (!t.assignedTo || t.assignedTo.id === user.id)).length;
+    }
     if (user.role === 'owner') {
       return tickets.filter(t => t.status === 'open').length;
     }

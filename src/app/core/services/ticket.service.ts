@@ -75,6 +75,12 @@ export class TicketService {
     await this.loadDetail(id);
   }
 
+  /** Asigna el ticket a alguien del equipo; null lo deja sin asignar. */
+  async assign(id: string, userId: string | null): Promise<void> {
+    await firstValueFrom(this.http.patch(`${API_URL}/tickets/${id}/assign`, { assignedToId: userId }));
+    await this.loadDetail(id);
+  }
+
   async addResponse(ticketId: string, content: string, attachment?: File): Promise<void> {
     const form = new FormData();
     form.append('content', content);

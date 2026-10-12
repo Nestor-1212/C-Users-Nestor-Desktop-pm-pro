@@ -1,7 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
-import { User } from '../models';
+import { StaffMember, User } from '../models';
 import { API_URL } from '../config/api.config';
 import { toUser, upsert } from '../http/mappers';
 
@@ -9,15 +9,25 @@ export interface UserInput {
   name: string;
   username: string;
   email: string;
-  companyId: string;
+  /** Solo para clientes; un técnico no pertenece a ninguna empresa. */
+  companyId: string | null;
+  role?: 'client' | 'technician';
 }
 
-/** Cuentas de las empresas cliente (solo el owner las administra). */
+/** Cuentas de clientes y técnicos (solo el owner las administra) y el equipo asignable. */
 @Injectable({ providedIn: 'root' })
 export class UserService {
   private http = inject(HttpClient);
   private _users = signal<User[]>([]);
   users = this._users.asReadonly();
+  private _staff = signal<StaffMember[]>([]);
+  /** Administrador y técnicos: a quién se le puede asignar un ticket. */
+  staff = this._staff.asReadonly();
+
+  async loadStaff(): Promise<void> {
+    const list = await firstValueFrom(this.http.get<any[]>(`${API_URL}/users/staff`));
+    this._staff.set(list.map(s => ({ id: s.id, name: s.name, role: s.role.toLowerCase() })));
+  }
 
   async load(): Promise<void> {
     const list = await firstValueFrom(this.http.get<any[]>(`${API_URL}/users`));
@@ -40,7 +50,8 @@ export class UserService {
   }
 
   async create(data: UserInput & { password: string }): Promise<User> {
-    const u = toUser(await firstValueFrom(this.http.post<any>(`${API_URL}/users`, data)));
+    const body = { ...data, role: (data.role ?? 'client').toUpperCase() };
+    const u = toUser(await firstValueFrom(this.http.post<any>(`${API_URL}/users`, body)));
     this._users.update(list => upsert(list, u));
     return u;
   }

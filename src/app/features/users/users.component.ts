@@ -21,7 +21,7 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
       <div class="page-header">
         <div>
           <h1>Usuarios</h1>
-          <p>Gestiona las cuentas de acceso de tus empresas cliente</p>
+          <p>Cuentas de tus empresas cliente y de tu equipo técnico de 3TECH</p>
         </div>
         <button class="btn-primary" (click)="openModal()">
           <app-icon name="plus" [size]="16" /> Nuevo Usuario
@@ -29,8 +29,15 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
       </div>
 
       <div class="quick-stats">
-        <app-stat-card [value]="clientUsers().length" label="Total Usuarios" icon="users" color="blue" />
+        <app-stat-card [value]="clientUsers().length" label="Usuarios de Clientes" icon="users" color="blue" />
+        <app-stat-card [value]="technicians().length" label="Técnicos 3TECH" icon="settings" color="yellow" />
         <app-stat-card [value]="companies().length" label="Empresas con Acceso" icon="building" color="indigo" />
+      </div>
+
+      <div class="role-tabs" role="tablist" aria-label="Tipo de cuenta">
+        <button role="tab" [class.active]="roleFilter() === ''" [attr.aria-selected]="roleFilter() === ''" (click)="roleFilter.set('')">Todos <span>{{ managedUsers().length }}</span></button>
+        <button role="tab" [class.active]="roleFilter() === 'client'" [attr.aria-selected]="roleFilter() === 'client'" (click)="roleFilter.set('client')">Clientes <span>{{ clientUsers().length }}</span></button>
+        <button role="tab" [class.active]="roleFilter() === 'technician'" [attr.aria-selected]="roleFilter() === 'technician'" (click)="roleFilter.set('technician')">Equipo 3TECH <span>{{ technicians().length }}</span></button>
       </div>
 
       <div class="filters-row">
@@ -57,7 +64,11 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
               <span class="user-name">{{ u.name }}</span>
               <span class="user-sub">&#64;{{ u.username }} · {{ u.email }}</span>
             </div>
-            <span class="company-chip"><app-icon name="building" [size]="12" /> {{ getCompanyName(u.companyId) }}</span>
+            @if (u.role === 'technician') {
+              <span class="company-chip tech"><app-icon name="settings" [size]="12" /> Técnico 3TECH</span>
+            } @else {
+              <span class="company-chip"><app-icon name="building" [size]="12" /> {{ getCompanyName(u.companyId) }}</span>
+            }
             <div class="user-actions">
               <button class="btn-icon" (click)="editUser(u)" title="Editar" aria-label="Editar usuario">
                 <app-icon name="edit" [size]="15" />
@@ -94,6 +105,21 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
           <form [formGroup]="form" (ngSubmit)="saveUser()" class="modal-body" novalidate>
             <div class="form-grid">
               <div class="form-group full">
+                <span class="field-label">Tipo de cuenta</span>
+                <div class="role-picker" role="radiogroup" aria-label="Tipo de cuenta">
+                  <button type="button" role="radio" [attr.aria-checked]="form.value.role === 'client'" [class.active]="form.getRawValue().role === 'client'"
+                    [disabled]="!!editingId()" (click)="setRole('client')">
+                    <app-icon name="building" [size]="16" />
+                    <span><strong>Cliente</strong><small>Usuario de una empresa cliente</small></span>
+                  </button>
+                  <button type="button" role="radio" [attr.aria-checked]="form.value.role === 'technician'" [class.active]="form.getRawValue().role === 'technician'"
+                    [disabled]="!!editingId()" (click)="setRole('technician')">
+                    <app-icon name="settings" [size]="16" />
+                    <span><strong>Técnico 3TECH</strong><small>Atiende tickets y proyectos</small></span>
+                  </button>
+                </div>
+              </div>
+              <div class="form-group full">
                 <label for="user-name">Nombre completo *</label>
                 <input id="user-name" type="text" formControlName="name" placeholder="Ej: Carlos López"
                   [class.error]="invalid('name')" [attr.aria-invalid]="invalid('name')">
@@ -116,6 +142,7 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
                   [class.error]="invalid('email')" [attr.aria-invalid]="invalid('email')">
                 @if (invalid('email')) { <span class="field-error">Ingresa un correo electrónico válido.</span> }
               </div>
+              @if (form.getRawValue().role === 'client') {
               <div class="form-group full">
                 <label for="user-company">Empresa *</label>
                 <select id="user-company" formControlName="companyId" [class.error]="invalid('companyId')">
@@ -126,6 +153,9 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
                 </select>
                 @if (invalid('companyId')) { <span class="field-error">Selecciona la empresa a la que pertenece.</span> }
               </div>
+              } @else {
+                <p class="tech-hint full">El técnico ve todos los tickets y proyectos y puede tomar tickets. No ve facturación, empresas, usuarios ni bitácora.</p>
+              }
               @if (!editingId()) {
                 <div class="form-group full">
                   <label for="user-password">Contraseña inicial *</label>
@@ -188,6 +218,21 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
       overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
     }
 
+    .role-tabs { display: inline-flex; gap: 4px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+    .role-tabs button { border: none; background: none; padding: 7px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; display: inline-flex; gap: 7px; align-items: center; }
+    .role-tabs button span { background: #f1f5f9; border-radius: 999px; padding: 0 8px; font-size: 12px; }
+    .role-tabs button.active { background: #0f4b92; color: #fff; }
+    .role-tabs button.active span { background: rgba(255,255,255,0.22); }
+    .company-chip.tech { background: #fdf3e6; color: #9a5d0c; }
+    .field-label { font-size: 13px; font-weight: 600; color: #374151; }
+    .role-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .role-picker button { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 12px; border: 1.5px solid #e2e8f0; border-radius: 12px; background: #fff; cursor: pointer; font-family: inherit; color: #475569; }
+    .role-picker button span { display: flex; flex-direction: column; }
+    .role-picker button strong { font-size: 13.5px; color: #0f172a; }
+    .role-picker button small { font-size: 12px; color: #64748b; }
+    .role-picker button.active { border-color: #0f4b92; background: #eef4fc; color: #0f4b92; }
+    .role-picker button:disabled:not(.active) { opacity: 0.45; cursor: not-allowed; }
+    .tech-hint { grid-column: 1 / -1; font-size: 12.5px; color: #9a5d0c; background: #fdf3e6; border-radius: 10px; padding: 10px 12px; margin: 0; }
     .quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 20px; }
 
     .users-list { display: flex; flex-direction: column; gap: 10px; }
@@ -248,6 +293,7 @@ export class UsersComponent {
 
   search = signal('');
   companyFilter = signal('');
+  roleFilter = signal<'' | 'client' | 'technician'>('');
   showModal = signal(false);
   editingId = signal<string | null>(null);
   resetUserTarget = signal<User | null>(null);
@@ -258,9 +304,12 @@ export class UsersComponent {
   constructor() {
     loadPageData(this.notify, this.userService.load(), this.companyService.load());
   }
-  clientUsers = computed(() => this.userService.users().filter(u => u.role === 'client'));
+  managedUsers = computed(() => this.userService.users().filter(u => u.role === 'client' || u.role === 'technician'));
+  clientUsers = computed(() => this.managedUsers().filter(u => u.role === 'client'));
+  technicians = computed(() => this.managedUsers().filter(u => u.role === 'technician'));
 
   form = this.fb.group({
+    role: ['client' as 'client' | 'technician'],
     name: ['', Validators.required],
     username: ['', [Validators.required, this.usernameTakenValidator()]],
     email: ['', [Validators.required, Validators.email]],
@@ -273,7 +322,8 @@ export class UsersComponent {
   });
 
   filteredUsers = computed(() => {
-    let list = this.clientUsers();
+    const rf = this.roleFilter();
+    let list = rf ? this.managedUsers().filter(u => u.role === rf) : this.managedUsers();
     const s = this.search().toLowerCase();
     const cf = this.companyFilter();
     if (s) list = list.filter(u => u.name.toLowerCase().includes(s) || u.username.toLowerCase().includes(s) || u.email.toLowerCase().includes(s));
@@ -304,9 +354,17 @@ export class UsersComponent {
     return isControlInvalid(this.form.get(name));
   }
 
+  /** Un técnico no pertenece a ninguna empresa: el campo se deshabilita para que no cuente en la validación. */
+  setRole(role: 'client' | 'technician') {
+    this.form.patchValue({ role });
+    const company = this.form.get('companyId');
+    if (role === 'technician') company?.disable(); else company?.enable();
+  }
+
   openModal() {
     this.editingId.set(null);
-    this.form.reset({ name: '', username: '', email: '', companyId: '', password: '' });
+    this.form.reset({ role: this.roleFilter() === 'technician' ? 'technician' : 'client', name: '', username: '', email: '', companyId: '', password: '' });
+    this.setRole(this.form.getRawValue().role!);
     this.form.get('password')?.enable();
     this.showModal.set(true);
   }
@@ -315,6 +373,7 @@ export class UsersComponent {
   editUser(u: User) {
     this.editingId.set(u.id);
     this.form.patchValue({ name: u.name, username: u.username, email: u.email, companyId: u.companyId || '' });
+    this.setRole(u.role === 'technician' ? 'technician' : 'client');
     this.form.get('password')?.disable();
     this.showModal.set(true);
   }
@@ -322,15 +381,17 @@ export class UsersComponent {
   async saveUser() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     const v = this.form.getRawValue();
-    const data = { name: v.name!, username: v.username!, email: v.email!, companyId: v.companyId! };
+    const isTech = v.role === 'technician';
+    const data = { name: v.name!, username: v.username!, email: v.email!, companyId: isTech ? null : v.companyId! };
     this.saving.set(true);
     try {
       if (this.editingId()) {
-        await this.userService.update(this.editingId()!, data);
+        const { companyId, ...common } = data;
+        await this.userService.update(this.editingId()!, isTech ? common : { ...common, companyId });
         this.notify.success('Usuario actualizado correctamente.');
       } else {
-        await this.userService.create({ ...data, password: v.password! });
-        this.notify.success('Usuario creado correctamente.');
+        await this.userService.create({ ...data, role: v.role!, password: v.password! });
+        this.notify.success(isTech ? 'Técnico creado. Ya puede iniciar sesión y tomar tickets.' : 'Usuario creado correctamente.');
       }
       this.closeModal();
     } catch (err) {

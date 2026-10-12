@@ -28,11 +28,11 @@ export class CompanyService {
   private _companies = signal<Company[]>([]);
   companies = this._companies.asReadonly();
 
-  /** El owner carga todas; un cliente solo la suya (para logo y plan → SLA). */
+  /** El equipo de 3TECH carga todas; un cliente solo la suya (para logo y plan → SLA). */
   async load(): Promise<void> {
     const user = this.auth.currentUser();
     if (!user) return;
-    if (user.role === 'owner') {
+    if (user.role === 'owner' || user.role === 'technician') {
       const list = await firstValueFrom(this.http.get<any[]>(`${API_URL}/companies`));
       this._companies.set(list.map(toCompany));
     } else if (user.companyId) {

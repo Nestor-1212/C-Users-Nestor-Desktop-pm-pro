@@ -11,11 +11,13 @@ import { IconComponent } from '../../shared/icon/icon.component';
 import { NotificationService } from '../../shared/services/notification.service';
 import { ProjectStatusLabelPipe, PriorityLabelPipe, RequirementStatusLabelPipe } from '../../shared/pipes/labels.pipe';
 import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/file.util';
+import { ProjectTrackingComponent } from './project-tracking.component';
+import { ProjectScheduleComponent } from './project-schedule.component';
 
 @Component({
   selector: 'app-project-detail',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink, DatePipe, IconComponent, ProjectStatusLabelPipe, PriorityLabelPipe, RequirementStatusLabelPipe],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, DatePipe, IconComponent, ProjectTrackingComponent, ProjectScheduleComponent, ProjectStatusLabelPipe, PriorityLabelPipe, RequirementStatusLabelPipe],
   template: `
     @if (project()) {
       <div class="detail-page">
@@ -50,7 +52,7 @@ import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/
               </div>
               <span class="progress-lbl">Progreso</span>
             </div>
-            @if (auth.isOwner()) {
+            @if (auth.isStaff()) {
               <div class="status-update">
                 <label for="project-status-select">Actualizar estado:</label>
                 <select id="project-status-select" (change)="updateStatus($any($event.target).value)">
@@ -69,7 +71,7 @@ import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/
         </div>
 
         <!-- Internal Notes (owner only) -->
-        @if (auth.isOwner() && project()!.internalNotes) {
+        @if (auth.isStaff() && project()!.internalNotes) {
           <div class="internal-notes">
             <span class="internal-badge"><app-icon name="lock" [size]="12" /> Nota interna</span>
             <p>{{ project()!.internalNotes }}</p>
@@ -78,6 +80,14 @@ import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/
 
         <!-- Tabs -->
         <div class="tabs-nav" role="tablist">
+          <button class="tab-btn" role="tab" [attr.aria-selected]="activeTab() === 'tracking'" [class.active]="activeTab() === 'tracking'" (click)="activeTab.set('tracking')">
+            <app-icon name="trending-up" [size]="15" /> Seguimiento
+          </button>
+          @if (showSchedule()) {
+            <button class="tab-btn" role="tab" [attr.aria-selected]="activeTab() === 'schedule'" [class.active]="activeTab() === 'schedule'" (click)="activeTab.set('schedule')">
+              <app-icon name="calendar" [size]="15" /> Cronograma
+            </button>
+          }
           <button class="tab-btn" role="tab" [attr.aria-selected]="activeTab() === 'comments'" [class.active]="activeTab() === 'comments'" (click)="activeTab.set('comments')">
             <app-icon name="message-circle" [size]="15" /> Comentarios <span class="tab-count">{{ project()!.comments.length }}</span>
           </button>
@@ -88,6 +98,16 @@ import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/
             <app-icon name="paperclip" [size]="15" /> Documentos <span class="tab-count">{{ project()!.documents.length }}</span>
           </button>
         </div>
+
+        <!-- Tab: Seguimiento (avance, enlaces y últimos avances) -->
+        @if (activeTab() === 'tracking') {
+          <app-project-tracking [project]="project()!" [canEdit]="auth.isStaff()" />
+        }
+
+        <!-- Tab: Cronograma (Gantt de etapas, tareas e hitos) -->
+        @if (activeTab() === 'schedule' && showSchedule()) {
+          <app-project-schedule [project]="project()!" [canEdit]="auth.isStaff()" />
+        }
 
         <!-- Tab: Comments -->
         @if (activeTab() === 'comments') {
@@ -115,7 +135,7 @@ import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/
               <form [formGroup]="commentForm" (ngSubmit)="addComment()" novalidate>
                 <label for="comment-content" class="sr-only">Comentario</label>
                 <textarea id="comment-content" formControlName="content" rows="3" placeholder="Escribe tu comentario..."></textarea>
-                @if (auth.isOwner()) {
+                @if (auth.isStaff()) {
                   <label class="checkbox-label" for="comment-internal">
                     <input id="comment-internal" type="checkbox" formControlName="isInternal">
                     Comentario interno (no visible para el cliente)
@@ -140,7 +160,7 @@ import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/
                   <p class="req-desc">{{ r.description }}</p>
                   <div class="req-footer">
                     <span class="req-date">{{ r.createdAt | date:'dd/MM/yyyy' }}</span>
-                    @if (auth.isOwner() && r.status === 'pending') {
+                    @if (auth.isStaff() && r.status === 'pending') {
                       <div class="req-actions">
                         <button class="btn-approve" (click)="updateReqStatus(r.id, 'approved')">
                           <app-icon name="check" [size]="13" /> Aprobar
@@ -387,15 +407,21 @@ export class ProjectDetailComponent implements OnInit {
   private notify = inject(NotificationService);
 
   projectId = signal('');
-  activeTab = signal<'comments' | 'requirements' | 'documents'>('comments');
+  activeTab = signal<'tracking' | 'schedule' | 'comments' | 'requirements' | 'documents'>('tracking');
 
   project = computed(() => this.projectService.getById(this.projectId()));
+  /** El cliente no ve la pestaña si el owner ocultó el cronograma y no hay archivo que descargar. */
+  showSchedule = computed(() => {
+    const p = this.project();
+    if (!p) return false;
+    return this.auth.isStaff() || p.scheduleVisibility !== 'hidden' || p.documents.some(d => d.isSchedule);
+  });
   companyName = computed(() => this.companyService.getById(this.project()?.companyId || '')?.name || 'N/A');
 
   visibleComments = computed(() => {
     const p = this.project();
     if (!p) return [];
-    if (this.auth.isOwner()) return p.comments;
+    if (this.auth.isStaff()) return p.comments;
     return p.comments.filter(c => !c.isInternal);
   });
 
@@ -450,7 +476,7 @@ export class ProjectDetailComponent implements OnInit {
     if (this.commentForm.invalid) { this.commentForm.markAllAsTouched(); return; }
     const { content, isInternal } = this.commentForm.value;
     const ok = await this.run(
-      this.projectService.addComment(this.projectId(), content!, this.auth.isOwner() && !!isInternal),
+      this.projectService.addComment(this.projectId(), content!, this.auth.isStaff() && !!isInternal),
       'Comentario agregado.',
     );
     if (ok) this.commentForm.reset({ isInternal: false });

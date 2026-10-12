@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard, ownerGuard } from './core/guards/auth.guard';
+import { authGuard, notTechnicianGuard, ownerGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
   { path: '', redirectTo: '/dashboard', pathMatch: 'full' },
@@ -15,7 +15,8 @@ export const routes: Routes = [
       {
         path: 'dashboard',
         data: { title: 'Dashboard' },
-        loadComponent: () => import('./features/dashboard/dashboard.component').then(m => m.DashboardComponent)
+        loadComponent: () => import('./features/dashboard/dashboard.component').then(m => m.DashboardComponent),
+        canActivate: [notTechnicianGuard]
       },
       {
         path: 'companies',
@@ -38,7 +39,8 @@ export const routes: Routes = [
       {
         path: 'billing',
         data: { title: 'Facturación' },
-        loadComponent: () => import('./features/billing/billing.component').then(m => m.BillingComponent)
+        loadComponent: () => import('./features/billing/billing.component').then(m => m.BillingComponent),
+        canActivate: [notTechnicianGuard]
       },
       {
         path: 'analytics',

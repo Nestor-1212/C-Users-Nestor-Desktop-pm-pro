@@ -8,7 +8,7 @@ export type IconName =
   | 'search' | 'user' | 'users' | 'calendar' | 'clock' | 'inbox'
   | 'dollar-sign' | 'message-circle' | 'clipboard' | 'paperclip' | 'tag'
   | 'file-text' | 'image' | 'archive' | 'download' | 'upload' | 'loader'
-  | 'send' | 'bell' | 'star';
+  | 'send' | 'bell' | 'star' | 'external-link' | 'copy' | 'globe' | 'trending-up' | 'play';
 
 @Component({
   selector: 'app-icon',
@@ -188,6 +188,26 @@ export type IconName =
         @case ('bell') {
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
           <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        }
+        @case ('external-link') {
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <path d="M15 3h6v6M10 14 21 3" />
+        }
+        @case ('copy') {
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        }
+        @case ('globe') {
+          <circle cx="12" cy="12" r="10" />
+          <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" />
+        }
+        @case ('trending-up') {
+          <path d="m22 7-8.5 8.5-5-5L2 17" />
+          <path d="M16 7h6v6" />
+        }
+        @case ('play') {
+          <circle cx="12" cy="12" r="10" />
+          <path d="m10 8 6 4-6 4V8Z" />
         }
         @case ('star') {
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26" />

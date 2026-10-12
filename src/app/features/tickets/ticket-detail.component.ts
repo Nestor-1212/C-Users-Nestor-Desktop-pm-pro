@@ -4,6 +4,7 @@ import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { TicketService } from '../../core/services/ticket.service';
+import { UserService } from '../../core/services/user.service';
 import { TicketStatus } from '../../core/models';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
 import { NotificationService } from '../../shared/services/notification.service';
@@ -42,6 +43,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
               <div class="ticket-description">{{ ticket()!.description }}</div>
               <div class="ticket-info-chips">
                 <span><app-icon name="building" [size]="13" /> {{ ticket()!.companyName }}</span>
+                @if (ticket()!.createdByName) { <span><app-icon name="user" [size]="13" /> {{ ticket()!.createdByName }}</span> }
                 <span><app-icon name="tag" [size]="13" /> {{ ticket()!.category | categoryLabel }}</span>
                 <span><app-icon name="calendar" [size]="13" /> Creado: {{ ticket()!.createdAt | date:'dd/MM/yyyy HH:mm' }}</span>
                 <span><app-icon name="clock" [size]="13" /> SLA: {{ ticket()!.slaDeadline | date:'dd/MM/yyyy HH:mm' }}</span>
@@ -93,7 +95,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
                 } @empty {
                   <div class="empty-thread">
                     <p>No hay respuestas todavía.</p>
-                    @if (auth.isOwner()) { <p>Responde este ticket para actualizar al cliente.</p> }
+                    @if (auth.isStaff()) { <p>Responde este ticket para actualizar al cliente.</p> }
                     @if (auth.isClient()) { <p>Tu ticket está siendo revisado. Recibirás respuesta en máximo {{ ticketService.getSlaTotalHours(ticket()!) }}h.</p> }
                   </div>
                 }
@@ -102,7 +104,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
               <!-- Reply Form -->
               @if (ticket()!.status !== 'closed') {
                 <div class="reply-form">
-                  <h4>{{ auth.isOwner() ? 'Responder al cliente' : 'Agregar mensaje' }}</h4>
+                  <h4>{{ auth.isStaff() ? 'Responder al cliente' : 'Agregar mensaje' }}</h4>
                   <form [formGroup]="replyForm" (ngSubmit)="sendReply()" novalidate>
                     <label for="reply-content" class="sr-only">Respuesta</label>
                     <textarea id="reply-content" formControlName="content" rows="4" placeholder="Escribe tu respuesta..."></textarea>
@@ -129,8 +131,39 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
 
           <!-- Right: Actions -->
           <div class="side-col">
+            <!-- Responsable -->
+            <div class="side-card">
+              <h4>Responsable</h4>
+              @if (ticket()!.assignedTo; as a) {
+                <div class="assignee">
+                  <span class="assignee-av" [class.owner]="a.role === 'owner'">{{ initials(a.name) }}</span>
+                  <div class="assignee-info">
+                    <strong>{{ a.name }}</strong>
+                    <span>{{ a.role === 'owner' ? 'Administrador 3TECH' : 'Técnico 3TECH' }}</span>
+                  </div>
+                </div>
+              } @else {
+                <p class="unassigned">{{ auth.isClient() ? 'Pronto un especialista de 3TECH tomará tu ticket.' : 'Nadie lo ha tomado todavía.' }}</p>
+              }
+              @if (auth.isOwner()) {
+                <label class="assign-label" for="ticket-assignee">Asignar a</label>
+                <select id="ticket-assignee" class="assign-select" (change)="assign($any($event.target).value || null)">
+                  <option value="" [selected]="!ticket()!.assignedTo">Sin asignar</option>
+                  @for (m of userService.staff(); track m.id) {
+                    <option [value]="m.id" [selected]="ticket()!.assignedTo?.id === m.id">{{ m.name }}{{ m.role === 'owner' ? ' (Administrador)' : '' }}</option>
+                  }
+                </select>
+              } @else if (auth.isTechnician()) {
+                @if (!ticket()!.assignedTo) {
+                  <button class="btn-take" (click)="assign(auth.currentUser()!.id)"><app-icon name="user" [size]="14" /> Tomar este ticket</button>
+                } @else if (ticket()!.assignedTo!.id === auth.currentUser()!.id) {
+                  <button class="btn-release" (click)="assign(null)">Soltar ticket</button>
+                }
+              }
+            </div>
+
             <!-- Status Management (owner only) -->
-            @if (auth.isOwner()) {
+            @if (auth.isStaff()) {
               <div class="side-card">
                 <h4>Gestión del ticket</h4>
                 <div class="status-actions">
@@ -161,6 +194,16 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
                   <span class="info-label">Empresa</span>
                   <span class="info-val">{{ ticket()!.companyName }}</span>
                 </div>
+                <div class="info-row">
+                  <span class="info-label">Creado por</span>
+                  <span class="info-val">{{ ticket()!.createdByName || '—' }}</span>
+                </div>
+                @if (ticket()!.resolvedByName) {
+                  <div class="info-row">
+                    <span class="info-label">Resuelto por</span>
+                    <span class="info-val">{{ ticket()!.resolvedByName }}</span>
+                  </div>
+                }
                 <div class="info-row">
                   <span class="info-label">Categoría</span>
                   <span class="info-val">{{ ticket()!.category | categoryLabel }}</span>
@@ -308,6 +351,18 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
 
     /* Side cards */
     .side-card { background: white; border-radius: 14px; padding: 18px; border: 1px solid #e2e8f0; }
+    .assignee { display: flex; align-items: center; gap: 10px; }
+    .assignee-av { width: 38px; height: 38px; border-radius: 50%; background: #e99d34; color: #fff; font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .assignee-av.owner { background: #0f4b92; }
+    .assignee-info { display: flex; flex-direction: column; }
+    .assignee-info strong { font-size: 14px; color: #0f172a; }
+    .assignee-info span { font-size: 12px; color: #64748b; }
+    .unassigned { font-size: 13px; color: #64748b; margin: 0; }
+    .assign-label { display: block; font-size: 12px; font-weight: 600; color: #64748b; margin: 12px 0 5px; }
+    .assign-select { width: 100%; padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: 13.5px; font-family: inherit; background: #fff; }
+    .btn-take, .btn-release { margin-top: 12px; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 10px; padding: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .btn-take { background: linear-gradient(135deg, #0f4b92, #1465c5); color: #fff; }
+    .btn-release { background: #f1f5f9; color: #475569; }
     .side-card.sla-danger { border-color: #fca5a5; background: #fff8f8; }
     .side-card h4 { font-size: 14px; font-weight: 700; color: #0f172a; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9; }
     .status-actions { display: flex; flex-direction: column; gap: 8px; }
@@ -358,6 +413,7 @@ import { TicketStatusLabelPipe, PriorityLabelPipe, CategoryLabelPipe } from '../
 export class TicketDetailComponent implements OnInit {
   auth = inject(AuthService);
   ticketService = inject(TicketService);
+  userService = inject(UserService);
   private route = inject(ActivatedRoute);
   private fb = inject(FormBuilder);
   private notify = inject(NotificationService);
@@ -379,7 +435,21 @@ export class TicketDetailComponent implements OnInit {
   ngOnInit() {
     const id = this.route.snapshot.paramMap.get('id') || '';
     this.ticketId.set(id);
-    loadPageData(this.notify, this.ticketService.loadDetail(id)).finally(() => this.loaded.set(true));
+    const loads: Promise<unknown>[] = [this.ticketService.loadDetail(id)];
+    if (this.auth.isOwner()) loads.push(this.userService.loadStaff());
+    loadPageData(this.notify, ...loads).finally(() => this.loaded.set(true));
+  }
+
+  initials(name: string): string {
+    return name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  }
+
+  assign(userId: string | null) {
+    const me = this.auth.currentUser()?.id;
+    const msg = userId === null ? 'El ticket quedó sin asignar.'
+      : userId === me ? 'Tomaste el ticket.'
+      : `Ticket asignado a ${this.userService.staff().find(m => m.id === userId)?.name ?? 'otro integrante'}. Se le notificó.`;
+    this.run(this.ticketService.assign(this.ticketId(), userId), msg);
   }
 
   private async run(action: Promise<unknown>, successMessage: string): Promise<boolean> {
