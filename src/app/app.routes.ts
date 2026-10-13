@@ -58,6 +58,11 @@ export const routes: Routes = [
         loadComponent: () => import('./features/tickets/tickets.component').then(m => m.TicketsComponent)
       },
       {
+        path: 'aprende',
+        data: { title: 'Aprende a pedir soporte' },
+        loadComponent: () => import('./features/help/ticket-tutorial.component').then(m => m.TicketTutorialComponent)
+      },
+      {
         path: 'tickets/:id',
         data: { title: 'Detalle de Ticket' },
         loadComponent: () => import('./features/tickets/ticket-detail.component').then(m => m.TicketDetailComponent)

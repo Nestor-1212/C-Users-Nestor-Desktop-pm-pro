@@ -41,7 +41,6 @@ import { ProjectScheduleComponent } from './project-schedule.component';
             <div class="project-meta-chips">
               <span><app-icon name="building" [size]="14" /> {{ companyName() }}</span>
               <span><app-icon name="calendar" [size]="14" /> {{ project()!.startDate }} → {{ project()!.endDate }}</span>
-              @if (project()!.budget) { <span><app-icon name="dollar-sign" [size]="14" /> Q{{ project()!.budget | number }}</span> }
             </div>
           </div>
           <div class="hero-right">

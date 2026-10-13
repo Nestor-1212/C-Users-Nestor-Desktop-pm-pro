@@ -7,7 +7,7 @@ import { apiErrorMessage } from '../../core/http/api-error';
 import { ActivityEntity, ActivityKind, ActivityLogEntry } from '../../core/models';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
 import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/export-menu.component';
-import { exportToExcel, exportToPdf, ExportColumn } from '../../shared/utils/export.util';
+import { ReportService, ReportColumn, ReportTone } from '../../shared/services/report.service';
 
 type Period = 'today' | '7d' | '30d' | '90d' | 'all';
 
@@ -272,6 +272,7 @@ const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 })
 export class ActivityComponent {
   private activityLog = inject(ActivityLogService);
+  private reports = inject(ReportService);
   private notify = inject(NotificationService);
 
   readonly periods: { value: Period; label: string }[] = [
@@ -453,17 +454,32 @@ export class ActivityComponent {
 
   export(format: ExportFormat) {
     const rows = this.entries();
-    const columns: ExportColumn<ActivityLogEntry>[] = [
-      { header: 'Fecha', value: e => new Date(e.createdAt).toLocaleString('es-GT') },
-      { header: 'Persona', value: e => e.actorName },
-      { header: 'Rol', value: e => this.roleLabel(e.actorRole) },
-      { header: 'Acción', value: e => e.description },
-      { header: 'Tipo', value: e => this.kindLabel(e.kind) },
-      { header: 'Registro', value: e => this.entityLabel(e.entityType) },
-      { header: 'IP', value: e => e.ip ?? '' },
+    const kindTone: Partial<Record<ActivityKind, ReportTone>> = { create: 'ok', delete: 'bad', security: 'bad', status: 'info', assign: 'warn', access: 'muted' };
+    const columns: ReportColumn<ActivityLogEntry>[] = [
+      { header: 'Fecha y hora', value: e => new Date(e.createdAt).toLocaleString('es-GT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), width: 1.3 },
+      { header: 'Persona', value: e => e.actorName, width: 1.3 },
+      { header: 'Rol', value: e => this.roleLabel(e.actorRole), width: 0.9 },
+      { header: 'Acción', value: e => e.description, width: 3.2 },
+      { header: 'Tipo', value: e => this.kindLabel(e.kind), width: 0.9, align: 'center', tone: e => kindTone[e.kind] ?? null },
+      { header: 'Registro', value: e => this.entityLabel(e.entityType), width: 0.9 },
+      { header: 'IP', value: e => e.ip ?? '', width: 1 },
     ];
-    if (format === 'excel') exportToExcel('bitacora', columns, rows);
-    else exportToPdf('Bitácora de actividad', 'bitacora', columns, rows);
+    const period = this.periods.find(p => p.value === this.period())?.label ?? '';
+    const actor = this.actors().find(a => a.id === this.actorId())?.name;
+    const entity = this.entities.find(e => e.value === this.entity())?.label;
+    const s = this.summary();
+    this.reports.export(format, {
+      title: 'Bitácora de actividad',
+      subtitle: [`Periodo: ${period}`, this.entity() && entity, this.kind() && `Acción: ${this.kindLabel(this.kind()!)}`, actor && `Persona: ${actor}`, this.search().trim() && `Búsqueda: "${this.search().trim()}"`].filter(Boolean).join(' · '),
+      filename: 'bitacora',
+      columns, rows,
+      summary: s ? [
+        { label: 'Eventos en el periodo', value: s.total },
+        { label: 'Personas activas', value: this.activePeople() },
+        { label: 'Eliminaciones', value: s.byKind.delete ?? 0, tone: s.byKind.delete ? 'bad' : 'ok' },
+        { label: 'Eventos de seguridad', value: s.byKind.security ?? 0, tone: s.byKind.security ? 'bad' : 'ok' },
+      ] : undefined,
+    });
     if (this.nextCursor()) this.notify.success(`Se exportaron los ${rows.length} eventos cargados. Usa "Cargar más" para incluir más.`);
   }
 }

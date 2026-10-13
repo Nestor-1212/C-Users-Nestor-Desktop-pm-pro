@@ -12,10 +12,18 @@ import { NotificationService } from '../../shared/services/notification.service'
 import { isControlInvalid } from '../../shared/utils/form.util';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 
-type Tab = 'clients' | 'team';
 interface Credentials { title: string; name: string; username: string; password: string }
 
 const isClosed = (t: Ticket) => t.status === 'resolved' || t.status === 'closed';
+/** "hace 5 min", "hace 3 h", "hace 2 d", "hace 4 sem". */
+function relative(ms: number): string {
+  const min = Math.round(ms / 60000);
+  if (min < 60) return `hace ${Math.max(1, min)} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.round(h / 24);
+  return d < 14 ? `hace ${d} d` : `hace ${Math.round(d / 7)} sem`;
+}
 const initials = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 /** "Carlos López" → "carlos.lopez" (sin tildes ni símbolos). */
 const suggestUsername = (name: string) => name.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -36,108 +44,138 @@ function generatePassword(): string {
       <div class="page-header">
         <div>
           <h1>Usuarios</h1>
-          <p>Quién puede entrar al sistema: las personas de tus clientes y tu equipo técnico</p>
+          <p>Quién puede entrar al sistema, agrupado por empresa y por tu equipo técnico</p>
         </div>
-        <button class="btn-primary" (click)="openModal(tab() === 'team' ? 'technician' : 'client')">
-          <app-icon name="plus" [size]="16" /> {{ tab() === 'team' ? 'Nuevo técnico' : 'Nuevo usuario' }}
+      </div>
+
+      <!-- Resumen -->
+      <div class="summary">
+        <div class="sum"><strong>{{ clientUsers().length + technicians().length }}</strong><span>Personas con acceso</span></div>
+        <div class="sum"><strong>{{ companiesWithAccess() }} <small>de {{ activeCompanies() }}</small></strong><span>Empresas con acceso</span></div>
+        <div class="sum"><strong>{{ technicians().length }}</strong><span>Técnicos 3TECH</span></div>
+        <button class="sum clickable" [class.alert]="neverLogged().length > 0" (click)="group.set('all'); onlyNever.set(!onlyNever())">
+          <strong>{{ neverLogged().length }}</strong><span>{{ onlyNever() ? 'Mostrando: nunca han entrado' : 'Nunca han entrado' }}</span>
         </button>
       </div>
 
-      <div class="toolbar">
-        <div class="tabs" role="tablist" aria-label="Tipo de cuenta">
-          <button role="tab" [class.active]="tab() === 'clients'" [attr.aria-selected]="tab() === 'clients'" (click)="tab.set('clients')">
-            <app-icon name="building" [size]="15" /> Clientes <span class="count">{{ clientUsers().length }}</span>
-          </button>
-          <button role="tab" [class.active]="tab() === 'team'" [attr.aria-selected]="tab() === 'team'" (click)="tab.set('team')">
-            <app-icon name="settings" [size]="15" /> Equipo 3TECH <span class="count">{{ technicians().length }}</span>
-          </button>
-        </div>
-        <div class="search-wrap">
-          <app-icon name="search" [size]="16" class="search-icon" />
-          <label for="user-search" class="sr-only">Buscar usuario</label>
-          <input id="user-search" type="text" class="search-input" [placeholder]="tab() === 'team' ? 'Buscar técnico...' : 'Buscar por nombre, usuario, correo o empresa...'"
-            [value]="search()" (input)="search.set($any($event.target).value)">
-        </div>
-      </div>
-
-      @if (tab() === 'clients') {
-        @if (companiesWithoutAccess().length && !search()) {
-          <div class="notice">
-            <app-icon name="alert-triangle" [size]="16" />
-            <span><strong>{{ companiesWithoutAccess().length }} empresa{{ companiesWithoutAccess().length === 1 ? '' : 's' }} sin acceso:</strong>
-              nadie de {{ companiesWithoutAccess().length === 1 ? 'ella' : 'ellas' }} puede ver sus proyectos ni reportar tickets.</span>
-          </div>
-        }
-
-        <div class="companies">
-          @for (g of clientGroups(); track g.id) {
-            <section class="company" [class.no-access]="!g.users.length">
-              <header class="company-head">
-                <span class="logo" [class.has-logo]="g.logo" [style.background]="g.logo ? '#fff' : avatarColor(g.id)">
-                  @if (g.logo) { <img [src]="g.logo" alt=""> } @else { {{ g.name[0] }} }
-                </span>
-                <div class="company-title">
-                  <h3>{{ g.name }}</h3>
-                  <span>{{ g.users.length ? g.users.length + ' persona' + (g.users.length === 1 ? '' : 's') + ' con acceso' : 'Sin acceso todavía' }}{{ g.inactive ? ' · empresa inactiva' : '' }}</span>
-                </div>
-                <button class="btn-ghost" (click)="openModal('client', g.id)"><app-icon name="plus" [size]="14" /> {{ g.users.length ? 'Agregar' : 'Crear acceso' }}</button>
-              </header>
-              @for (u of g.users; track u.id) {
-                <div class="person">
-                  <span class="av" [style.background]="avatarColor(u.id)">{{ initialsOf(u.name) }}</span>
-                  <div class="person-main">
-                    <strong>{{ u.name }}</strong>
-                    <span><span class="mono">&#64;{{ u.username }}</span> · <a [href]="'mailto:' + u.email">{{ u.email }}</a></span>
-                  </div>
-                  <span class="stat" [title]="u.ticketsCreated + ' ticket(s) creados'"><app-icon name="ticket" [size]="13" /> {{ u.ticketsCreated }} creado{{ u.ticketsCreated === 1 ? '' : 's' }}</span>
-                  <div class="actions">
-                    <button class="btn-icon" (click)="openResetModal(u)" title="Cambiar contraseña" aria-label="Cambiar contraseña"><app-icon name="lock" [size]="14" /></button>
-                    <button class="btn-icon" (click)="editUser(u)" title="Editar" aria-label="Editar usuario"><app-icon name="edit" [size]="14" /></button>
-                    <button class="btn-icon danger" (click)="deleteUser(u)" title="Quitar acceso" aria-label="Quitar acceso"><app-icon name="trash" [size]="14" /></button>
-                  </div>
-                </div>
-              } @empty {
-                <p class="no-users">Crea al menos un usuario para que esta empresa vea el avance de sus proyectos y pueda pedir soporte.</p>
-              }
-            </section>
-          } @empty {
-            <div class="empty-state"><div class="empty-icon"><app-icon name="users" [size]="30" /></div><h3>Sin resultados</h3><p>No hay usuarios que coincidan con tu búsqueda.</p></div>
+      <div class="directory">
+        <!-- Grupos -->
+        <nav class="groups" aria-label="Grupos de usuarios">
+          @for (g of fixedGroups(); track g.id) {
+            <button class="group-item" [class.active]="group() === g.id" (click)="selectGroup(g.id)">
+              <span class="g-icon" [class.team]="g.id === 'team'"><app-icon [name]="g.icon" [size]="16" /></span>
+              <span class="g-name">{{ g.label }}</span>
+              <span class="g-count">{{ g.count }}</span>
+            </button>
           }
-        </div>
-      } @else {
-        <div class="team">
-          @for (t of teamRows(); track t.id) {
-            <article class="tech">
-              <div class="tech-top">
-                <span class="av lg orange">{{ initialsOf(t.name) }}</span>
-                <div class="person-main">
-                  <strong>{{ t.name }}</strong>
-                  <span><span class="mono">&#64;{{ t.username }}</span></span>
-                  <a [href]="'mailto:' + t.email">{{ t.email }}</a>
+          <span class="groups-title">Empresas</span>
+          @for (c of companyGroups(); track c.id) {
+            <button class="group-item" [class.active]="group() === c.id" [class.inactive]="c.inactive" (click)="selectGroup(c.id)">
+              <span class="g-logo" [class.has-logo]="c.logo" [style.background]="c.logo ? '#fff' : avatarColor(c.id)">
+                @if (c.logo) { <img [src]="c.logo" alt=""> } @else { {{ c.name[0] }} }
+              </span>
+              <span class="g-name">{{ c.name }}@if (c.inactive) { <small>Inactiva</small> }</span>
+              @if (c.count) { <span class="g-count">{{ c.count }}</span> }
+              @else { <span class="g-warn" title="Sin acceso: nadie de esta empresa puede entrar"><app-icon name="alert-triangle" [size]="13" /></span> }
+            </button>
+          }
+        </nav>
+
+        <!-- Personas del grupo -->
+        <section class="people-pane">
+          <header class="pane-head">
+            @if (selectedCompany(); as c) {
+              <span class="g-logo lg" [class.has-logo]="c.logo" [style.background]="c.logo ? '#fff' : avatarColor(c.id)">
+                @if (c.logo) { <img [src]="c.logo" alt=""> } @else { {{ c.name[0] }} }
+              </span>
+              <div class="pane-title">
+                <h2>{{ c.name }}</h2>
+                <span>{{ c.status === 'active' ? 'Empresa activa' : 'Empresa inactiva' }} · {{ people().length }} {{ people().length === 1 ? 'persona' : 'personas' }} con acceso</span>
+              </div>
+            } @else {
+              <span class="g-icon lg" [class.team]="group() === 'team'"><app-icon [name]="group() === 'team' ? 'settings' : 'users'" [size]="20" /></span>
+              <div class="pane-title">
+                <h2>{{ group() === 'team' ? 'Equipo 3TECH' : 'Todas las personas' }}</h2>
+                <span>{{ group() === 'team' ? 'Atienden tickets y proyectos. No ven empresas, usuarios, bitácora ni analíticas.' : 'Clientes y técnicos con acceso al sistema' }}</span>
+              </div>
+            }
+            <div class="search-wrap pane-search">
+              <app-icon name="search" [size]="15" class="search-icon" />
+              <label for="user-search" class="sr-only">Buscar persona</label>
+              <input id="user-search" type="text" class="search-input" placeholder="Buscar persona…"
+                [value]="search()" (input)="search.set($any($event.target).value)">
+            </div>
+            <button class="btn-add" (click)="addPerson()"><app-icon name="plus" [size]="14" /> {{ group() === 'team' ? 'Agregar técnico' : 'Agregar persona' }}</button>
+          </header>
+
+          @if (people().length) {
+            <div class="table" role="table" aria-label="Personas">
+              <div class="t-head" role="row">
+                <span role="columnheader">Persona</span>
+                <span role="columnheader">Usuario</span>
+                <span role="columnheader">{{ group() === 'all' ? 'Empresa / rol' : 'Rol' }}</span>
+                <span role="columnheader">Actividad</span>
+                <span role="columnheader">Último acceso</span>
+                <span role="columnheader" class="sr-only">Acciones</span>
+              </div>
+              @for (u of people(); track u.id) {
+                <div class="t-row" role="row">
+                  <span class="cell person" role="cell">
+                    <span class="av" [class.tech]="u.role === 'technician'" [style.background]="u.role === 'technician' ? null : avatarColor(u.id)">{{ initialsOf(u.name) }}</span>
+                    <span class="person-main">
+                      <strong>{{ u.name }}</strong>
+                      <a [href]="'mailto:' + u.email">{{ u.email }}</a>
+                    </span>
+                  </span>
+                  <span class="cell mono" role="cell">&#64;{{ u.username }}</span>
+                  <span class="cell" role="cell">
+                    @if (u.role === 'technician') { <span class="role-chip tech">Técnico 3TECH</span> }
+                    @else if (selectedCompany()) { <span class="role-chip client">Cliente</span> }
+                    @else { <span class="company-name">{{ u.companyName }}</span> }
+                  </span>
+                  <span class="cell activity" role="cell">
+                    @if (u.role === 'technician') {
+                      <span [class.warn]="u.breached > 0">{{ u.open }} abiertos</span> · {{ u.resolved }} resueltos
+                    } @else {
+                      {{ u.ticketsCreated }} {{ u.ticketsCreated === 1 ? 'ticket creado' : 'tickets creados' }}
+                    }
+                  </span>
+                  <span class="cell" role="cell">
+                    @if (u.lastLoginAt) { <span class="login" [class.recent]="u.recent">{{ u.lastLoginLabel }}</span> }
+                    @else { <span class="login never">Nunca ha entrado</span> }
+                  </span>
+                  <span class="cell menu-cell" role="cell">
+                    <button class="btn-menu" [attr.aria-expanded]="menuFor() === u.id" [attr.aria-label]="'Acciones para ' + u.name" (click)="toggleMenu(u.id)">
+                      <span aria-hidden="true">⋯</span>
+                    </button>
+                    @if (menuFor() === u.id) {
+                      <div class="menu-backdrop" (click)="menuFor.set(null)"></div>
+                      <div class="menu" role="menu">
+                        <button role="menuitem" (click)="menuFor.set(null); openResetModal(u.user)"><app-icon name="lock" [size]="14" /> Cambiar contraseña</button>
+                        <button role="menuitem" (click)="menuFor.set(null); editUser(u.user)"><app-icon name="edit" [size]="14" /> Editar datos</button>
+                        <button role="menuitem" class="danger" (click)="menuFor.set(null); deleteUser(u.user)"><app-icon name="trash" [size]="14" /> Quitar acceso</button>
+                      </div>
+                    }
+                  </span>
                 </div>
-              </div>
-              <div class="tech-stats">
-                <div [class.warn]="t.breached > 0"><strong>{{ t.open }}</strong><span>Abiertos</span></div>
-                <div><strong>{{ t.resolved }}</strong><span>Resueltos</span></div>
-                <div><strong>{{ t.csat ?? '—' }}</strong><span>Satisfacción</span></div>
-              </div>
-              @if (t.breached) { <p class="tech-alert"><app-icon name="alert-triangle" [size]="13" /> {{ t.breached }} ticket{{ t.breached === 1 ? '' : 's' }} con SLA vencido</p> }
-              <div class="tech-actions">
-                <button class="btn-ghost" (click)="openResetModal(t.user)"><app-icon name="lock" [size]="13" /> Contraseña</button>
-                <button class="btn-ghost" (click)="editUser(t.user)"><app-icon name="edit" [size]="13" /> Editar</button>
-                <button class="btn-ghost danger" (click)="deleteUser(t.user)"><app-icon name="trash" [size]="13" /> Quitar</button>
-              </div>
-            </article>
-          } @empty {
-            <div class="empty-state grid-span">
-              <div class="empty-icon"><app-icon name="settings" [size]="30" /></div>
-              <h3>{{ search() ? 'Sin resultados' : 'Aún no tienes técnicos' }}</h3>
-              <p>{{ search() ? 'Ningún técnico coincide con tu búsqueda.' : 'Crea a tu equipo para poder asignarles tickets.' }}</p>
+              }
+            </div>
+          } @else {
+            <div class="pane-empty">
+              @if (selectedCompany() && !search() && !onlyNever()) {
+                <span class="empty-icon warn"><app-icon name="alert-triangle" [size]="26" /></span>
+                <h3>Nadie de {{ selectedCompany()!.name }} puede entrar todavía</h3>
+                <p>Crea su primer acceso para que vean el avance de sus proyectos y puedan pedir soporte.</p>
+                <button class="btn-primary" (click)="addPerson()"><app-icon name="plus" [size]="15" /> Crear el primer acceso</button>
+              } @else {
+                <span class="empty-icon"><app-icon name="users" [size]="26" /></span>
+                <h3>Sin resultados</h3>
+                <p>Ninguna persona coincide con la búsqueda.</p>
+              }
             </div>
           }
-        </div>
-        <p class="team-note"><app-icon name="eye" [size]="14" /> Los técnicos ven y trabajan todos los tickets y proyectos. No ven empresas, usuarios, bitácora ni analíticas.</p>
-      }
+        </section>
+      </div>
     </div>
 
     <!-- Crear / editar -->
@@ -274,64 +312,105 @@ function generatePassword(): string {
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 
-    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
-    .tabs { display: inline-flex; gap: 4px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 4px; }
-    .tabs button { border: none; background: none; padding: 8px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
-    .tabs button.active { background: #0f4b92; color: #fff; }
-    .count { background: #f1f5f9; color: #475569; border-radius: 999px; padding: 0 8px; font-size: 12px; }
-    .tabs button.active .count { background: rgba(255,255,255,0.22); color: #fff; }
-    .toolbar .search-wrap { flex: 1; min-width: 240px; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+    .sum { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 16px; display: flex; flex-direction: column; text-align: left; font-family: inherit; }
+    .sum strong { font-size: 22px; font-weight: 800; color: #0f172a; line-height: 1.2; }
+    .sum strong small { font-size: 13px; color: #94a3b8; font-weight: 600; }
+    .sum span { font-size: 12.5px; color: #64748b; }
+    .sum.clickable { cursor: pointer; }
+    .sum.clickable:hover { border-color: #0f4b92; }
+    .sum.alert strong { color: #c47a14; }
 
-    .notice { display: flex; align-items: center; gap: 10px; background: #fdf3e6; border: 1px solid #f5d3a3; color: #8a520a; border-radius: 12px; padding: 11px 14px; margin-bottom: 16px; font-size: 13.5px; }
+    /* Directorio: grupos | personas */
+    .directory { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .groups { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 10px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px; max-height: calc(100vh - 140px); overflow-y: auto; }
+    .groups-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 700; padding: 12px 10px 6px; }
+    .group-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: none; background: none; border-radius: 10px; cursor: pointer; text-align: left; font-family: inherit; width: 100%; }
+    .group-item:hover { background: #f8fafc; }
+    .group-item.active { background: #eef4fc; }
+    .group-item.active .g-name { color: #0f4b92; font-weight: 800; }
+    .group-item.inactive { opacity: 0.6; }
+    .g-icon { width: 30px; height: 30px; border-radius: 9px; background: #eef4fc; color: #0f4b92; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .g-icon.team { background: #fdf3e6; color: #c47a14; }
+    .g-icon.lg, .g-logo.lg { width: 46px; height: 46px; border-radius: 12px; }
+    .g-logo { width: 30px; height: 30px; border-radius: 9px; color: #fff; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+    .g-logo.lg { font-size: 19px; }
+    .g-logo.has-logo { box-shadow: inset 0 0 0 1.5px #e2e8f0; }
+    .g-logo img { width: 100%; height: 100%; object-fit: contain; padding: 3px; box-sizing: border-box; }
+    .g-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; flex-direction: column; }
+    .g-name small { font-size: 11px; color: #94a3b8; font-weight: 500; }
+    .g-count { font-size: 12px; font-weight: 700; background: #f1f5f9; color: #475569; border-radius: 999px; padding: 1px 9px; }
+    .group-item.active .g-count { background: #0f4b92; color: #fff; }
+    .g-warn { color: #e99d34; display: inline-flex; }
 
-    /* Clientes por empresa */
-    .companies { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
-    @media (min-width: 1400px) { .companies { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    .company { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; }
-    .company.no-access { border-style: dashed; border-color: #f5d3a3; }
-    .company-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: #fbfcfe; border-bottom: 1px solid #f1f5f9; }
-    .logo { width: 38px; height: 38px; border-radius: 10px; color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
-    .logo.has-logo { box-shadow: inset 0 0 0 1.5px #e2e8f0; }
-    .logo img { width: 100%; height: 100%; object-fit: contain; padding: 3px; box-sizing: border-box; }
-    .company-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-    .company-title h3 { margin: 0; font-size: 15px; font-weight: 800; color: #0f172a; }
-    .company-title span { font-size: 12px; color: #64748b; }
-    .no-access .company-title span { color: #b06a0c; font-weight: 600; }
-    .person { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid #f8fafc; }
-    .person:last-child { border-bottom: none; }
-    .person:hover { background: #fafbfd; }
+    .people-pane { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; min-width: 0; }
+    .pane-head { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid #f1f5f9; flex-wrap: wrap; }
+    .pane-title { flex: 1; min-width: 200px; }
+    .pane-title h2 { margin: 0; font-size: 18px; font-weight: 800; color: #0f172a; }
+    .pane-title span { font-size: 12.5px; color: #64748b; }
+    .pane-search { flex: 0 1 260px; min-width: 180px; }
+    .btn-add { display: inline-flex; align-items: center; gap: 6px; border: none; background: #0f4b92; color: #fff; font-weight: 700; font-size: 13px; padding: 9px 14px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+    .btn-add:hover { background: #0c3d78; }
+
+    .table { display: flex; flex-direction: column; }
+    .t-head, .t-row { display: grid; grid-template-columns: minmax(220px, 2.2fr) minmax(110px, 1fr) minmax(140px, 1.3fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 44px; align-items: center; gap: 12px; padding: 0 18px; }
+    .t-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; font-weight: 700; padding-top: 12px; padding-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+    .t-row { padding-top: 11px; padding-bottom: 11px; border-bottom: 1px solid #f8fafc; }
+    .t-row:last-child { border-bottom: none; }
+    .t-row:hover { background: #fafbfd; }
+    .cell { font-size: 13px; color: #334155; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .person { display: flex; align-items: center; gap: 11px; overflow: visible; }
     .av { width: 36px; height: 36px; border-radius: 50%; color: #fff; font-size: 12.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .av.lg { width: 48px; height: 48px; font-size: 16px; }
-    .av.orange { background: #e99d34; }
-    .person-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .person-main strong { font-size: 14px; color: #0f172a; }
-    .person-main span, .person-main a { font-size: 12.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .person-main a { color: #0f4b92; text-decoration: none; }
-    .person-main a:hover { text-decoration: underline; }
-    .stat { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #64748b; background: #f8fafc; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
-    .actions { display: flex; gap: 4px; }
-    .no-users { margin: 0; padding: 14px 16px; font-size: 13px; color: #8a520a; }
+    .av.tech { background: #e99d34; }
+    .person-main { min-width: 0; display: flex; flex-direction: column; }
+    .person-main strong { font-size: 14px; color: #0f172a; overflow: hidden; text-overflow: ellipsis; }
+    .person-main a { font-size: 12.5px; color: #64748b; text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
+    .person-main a:hover { color: #0f4b92; text-decoration: underline; }
+    .role-chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+    .role-chip.tech { background: #fdf3e6; color: #a8620a; }
+    .role-chip.client { background: #eef4fc; color: #0f4b92; }
+    .company-name { font-weight: 600; }
+    .activity .warn { color: #dc2626; font-weight: 700; }
+    .login { font-size: 12.5px; color: #475569; }
+    .login.recent { color: #5b6b12; font-weight: 700; }
+    .login.never { color: #c47a14; font-weight: 700; }
+    .menu-cell { position: relative; overflow: visible; display: flex; justify-content: flex-end; }
+    .btn-menu { width: 32px; height: 32px; border-radius: 8px; border: none; background: none; color: #64748b; font-size: 18px; font-weight: 800; cursor: pointer; line-height: 1; }
+    .btn-menu:hover, .btn-menu[aria-expanded="true"] { background: #f1f5f9; color: #0f172a; }
+    .menu-backdrop { position: fixed; inset: 0; z-index: 40; }
+    .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 6px; min-width: 200px; box-shadow: 0 16px 40px -12px rgba(15,23,42,0.25); display: flex; flex-direction: column; }
+    .menu button { display: flex; align-items: center; gap: 9px; border: none; background: none; padding: 9px 10px; border-radius: 8px; font-size: 13.5px; font-family: inherit; color: #334155; cursor: pointer; text-align: left; }
+    .menu button:hover { background: #f1f5f9; }
+    .menu button.danger { color: #dc2626; }
+    .menu button.danger:hover { background: #fef2f2; }
 
-    .btn-icon { width: 30px; height: 30px; border-radius: 8px; border: none; background: #f1f5f9; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #475569; flex-shrink: 0; }
-    .btn-icon:hover { background: #d1e4fa; color: #0f4b92; }
-    .btn-icon.danger:hover { background: #fee2e2; color: #dc2626; }
-    .btn-ghost { display: inline-flex; align-items: center; gap: 5px; border: none; background: #eef4fc; color: #0f4b92; font-weight: 700; font-size: 12.5px; padding: 7px 11px; border-radius: 9px; cursor: pointer; white-space: nowrap; }
-    .btn-ghost:hover { background: #d1e4fa; }
-    .btn-ghost.danger { background: #fef2f2; color: #dc2626; }
+    .pane-empty { text-align: center; padding: 48px 20px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .pane-empty h3 { margin: 6px 0 0; font-size: 16px; color: #0f172a; }
+    .pane-empty p { margin: 0 0 10px; font-size: 13.5px; color: #64748b; max-width: 420px; }
+    .empty-icon { width: 56px; height: 56px; border-radius: 16px; background: #f1f5f9; color: #64748b; display: flex; align-items: center; justify-content: center; }
+    .empty-icon.warn { background: #fdf3e6; color: #c47a14; }
 
-    /* Equipo */
-    .team { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-    .tech { background: #fff; border: 1px solid #e2e8f0; border-top: 4px solid #e99d34; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-    .tech-top { display: flex; align-items: center; gap: 12px; }
-    .tech-stats { display: grid; grid-template-columns: repeat(3, 1fr); background: #f8fafc; border-radius: 12px; padding: 10px 0; }
-    .tech-stats div { display: flex; flex-direction: column; align-items: center; border-right: 1px solid #eef2f7; }
-    .tech-stats div:last-child { border-right: none; }
-    .tech-stats strong { font-size: 20px; font-weight: 800; color: #0f172a; }
-    .tech-stats span { font-size: 11px; color: #64748b; }
-    .tech-stats .warn strong { color: #dc2626; }
-    .tech-alert { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; font-weight: 600; color: #dc2626; }
-    .tech-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    .team-note { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: #64748b; margin: 16px 0 0; }
+    /* Pantallas medianas: la tabla se convierte en tarjetas apiladas */
+    @media (max-width: 1100px) {
+      .t-head { display: none; }
+      .t-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "person menu" "user user" "company company" "activity activity" "login login"; row-gap: 4px; }
+      .t-row .person { grid-area: person; }
+      .t-row .menu-cell { grid-area: menu; }
+      .t-row .cell:nth-child(2) { grid-area: user; padding-left: 47px; }
+      .t-row .cell:nth-child(3) { grid-area: company; padding-left: 47px; }
+      .t-row .cell:nth-child(4) { grid-area: activity; padding-left: 47px; }
+      .t-row .cell:nth-child(5) { grid-area: login; padding-left: 47px; }
+    }
+    /* Tablet y celular: los grupos pasan a una fila deslizable arriba */
+    @media (max-width: 900px) {
+      .directory { grid-template-columns: 1fr; }
+      .groups { position: static; max-height: none; flex-direction: row; overflow-x: auto; padding: 8px; }
+      .groups-title { display: none; }
+      .group-item { width: auto; flex-shrink: 0; }
+      .g-name { max-width: 160px; }
+      .summary { grid-template-columns: 1fr 1fr; }
+      .pane-search { flex: 1 1 100%; }
+    }
 
     /* Formularios */
     .modal.small { max-width: 440px; }
@@ -387,7 +466,10 @@ export class UsersComponent {
   initialsOf = initials;
   readonly loginUrl = `${window.location.origin}/login`;
 
-  tab = signal<Tab>('clients');
+  /** 'all' = todas las personas, 'team' = técnicos, o el id de una empresa. */
+  group = signal<string>('all');
+  onlyNever = signal(false);
+  menuFor = signal<string | null>(null);
   search = signal('');
   showModal = signal(false);
   editingId = signal<string | null>(null);
@@ -425,44 +507,70 @@ export class UsersComponent {
     return !s || text.some(v => v.toLowerCase().includes(s));
   }
 
-  /** Empresas con sus usuarios: primero las que no tienen acceso, luego por nombre. */
-  clientGroups = computed(() => {
-    const tickets = this.ticketService.getAll();
-    const users = this.clientUsers();
-    return this.companies()
-      .map(c => {
-        const companyMatches = this.matches([c.name]);
-        const members = users.filter(u => u.companyId === c.id)
-          .filter(u => companyMatches || this.matches([u.name, u.username, u.email]))
-          .map(u => ({ ...u, ticketsCreated: tickets.filter(t => t.createdById === u.id).length }));
-        return { id: c.id, name: c.name, logo: c.logo, inactive: c.status === 'inactive', users: members, show: companyMatches || members.length > 0 };
-      })
-      .filter(g => g.show)
-      .sort((a, b) => Number(a.users.length > 0) - Number(b.users.length > 0) || Number(a.inactive) - Number(b.inactive) || a.name.localeCompare(b.name));
-  });
-
-  companiesWithoutAccess = computed(() => {
+  activeCompanies = computed(() => this.companies().filter(c => c.status === 'active').length);
+  /** Empresas ACTIVAS que tienen al menos una persona con acceso (mismo universo que activeCompanies). */
+  companiesWithAccess = computed(() => {
     const withUsers = new Set(this.clientUsers().map(u => u.companyId));
-    return this.companies().filter(c => c.status === 'active' && !withUsers.has(c.id));
+    return this.companies().filter(c => c.status === 'active' && withUsers.has(c.id)).length;
   });
+  neverLogged = computed(() => [...this.clientUsers(), ...this.technicians()].filter(u => !u.lastLoginAt));
 
-  teamRows = computed(() => {
+  fixedGroups = computed(() => [
+    { id: 'all', label: 'Todas las personas', icon: 'users' as const, count: this.clientUsers().length + this.technicians().length },
+    { id: 'team', label: 'Equipo 3TECH', icon: 'settings' as const, count: this.technicians().length },
+  ]);
+
+  /** Empresas para la columna izquierda: activas primero, luego por nombre. */
+  companyGroups = computed(() => this.companies()
+    .map(c => ({ id: c.id, name: c.name, logo: c.logo, inactive: c.status === 'inactive', count: this.clientUsers().filter(u => u.companyId === c.id).length }))
+    .sort((a, b) => Number(a.inactive) - Number(b.inactive) || a.name.localeCompare(b.name)));
+
+  selectedCompany = computed(() => this.companies().find(c => c.id === this.group()) ?? null);
+
+
+  /** Personas del grupo elegido con su actividad y último acceso. */
+  people = computed(() => {
+    const g = this.group();
     const tickets = this.ticketService.getAll();
-    return this.technicians()
-      .filter(u => this.matches([u.name, u.username, u.email]))
+    const base = g === 'all' ? [...this.technicians(), ...this.clientUsers()]
+      : g === 'team' ? this.technicians()
+      : this.clientUsers().filter(u => u.companyId === g);
+    const s = this.search().trim().toLowerCase();
+    const now = Date.now();
+    return base
+      .filter(u => !this.onlyNever() || !u.lastLoginAt)
       .map(u => {
+        const companyName = this.companyService.getById(u.companyId ?? '')?.name ?? '';
         const mine = tickets.filter(t => t.assignedTo?.id === u.id);
         const open = mine.filter(t => !isClosed(t));
+        const last = u.lastLoginAt ? new Date(u.lastLoginAt).getTime() : null;
         return {
-          id: u.id, name: u.name, username: u.username, email: u.email, user: u,
-          open: open.length,
+          ...u, user: u, companyName,
+          ticketsCreated: tickets.filter(t => t.createdById === u.id).length,
+          open: open.length, resolved: mine.filter(isClosed).length,
           breached: open.filter(t => this.ticketService.isSlaBreached(t)).length,
-          resolved: mine.filter(isClosed).length,
-          csat: this.ticketService.getAverageSatisfaction(mine),
+          lastLoginLabel: last ? relative(now - last) : '',
+          recent: !!last && now - last < 24 * 36e5,
         };
       })
-      .sort((a, b) => b.open - a.open);
+      .filter(u => !s || [u.name, u.username, u.email, u.companyName].some(v => v.toLowerCase().includes(s)))
+      .sort((a, b) => Number(b.role === 'technician') - Number(a.role === 'technician') || a.companyName.localeCompare(b.companyName) || a.name.localeCompare(b.name));
   });
+
+  selectGroup(id: string) {
+    this.group.set(id);
+    this.onlyNever.set(false);
+    this.search.set('');
+  }
+
+  toggleMenu(id: string) { this.menuFor.set(this.menuFor() === id ? null : id); }
+
+  /** "Agregar" según el grupo: técnico en el equipo, cliente con la empresa ya elegida en una empresa. */
+  addPerson() {
+    const g = this.group();
+    if (g === 'team') this.openModal('technician');
+    else this.openModal('client', g === 'all' ? '' : g);
+  }
 
   private usernameTakenValidator() {
     return (control: AbstractControl): ValidationErrors | null => {

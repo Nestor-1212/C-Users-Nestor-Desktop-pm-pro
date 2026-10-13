@@ -14,7 +14,6 @@ export interface ProjectInput {
   progress: number;
   startDate: string;
   endDate: string;
-  budget?: number | null;
   internalNotes?: string | null;
   tags?: string[];
   scheduleVisibility?: ScheduleVisibility;

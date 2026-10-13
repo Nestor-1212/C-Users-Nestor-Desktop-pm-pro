@@ -12,7 +12,9 @@ import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-tra
 import { ConfirmService } from '../../shared/services/confirm.service';
 import { NotificationService } from '../../shared/services/notification.service';
 import { isControlInvalid } from '../../shared/utils/form.util';
-import { exportToExcel, exportToPdf } from '../../shared/utils/export.util';
+import { ReportService, ReportColumn, ReportTone } from '../../shared/services/report.service';
+import { projectSchedule } from '../../shared/utils/project-health';
+import { Project as ProjectModel } from '../../core/models';
 import { ProjectStatusLabelPipe, PriorityLabelPipe, PROJECT_STATUS_LABELS, PRIORITY_LABELS } from '../../shared/pipes/labels.pipe';
 import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/export-menu.component';
 
@@ -83,7 +85,6 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
                   }
                   <span class="meta-item"><app-icon name="calendar" [size]="13" /> {{ p.startDate }} → {{ p.endDate }}</span>
                   <span class="meta-item priority-label" [class]="p.priority">{{ p.priority | priorityLabel }}</span>
-                  @if (p.budget) { <span class="meta-item"><app-icon name="dollar-sign" [size]="13" /> Q{{ p.budget | number }}</span> }
                 </div>
                 <div class="tags-row">
                   @for (tag of p.tags || []; track tag) {
@@ -214,10 +215,6 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
                   [class.error]="invalid('endDate')" [attr.aria-invalid]="invalid('endDate')">
                 @if (invalid('endDate')) { <span class="field-error">La fecha de fin es obligatoria.</span> }
               </div>
-              <div class="form-group">
-                <label for="project-budget">Presupuesto (Q)</label>
-                <input id="project-budget" type="number" formControlName="budget" placeholder="0" min="0">
-              </div>
               <div class="form-group full">
                 <label for="project-notes">Notas internas (solo visible para ti)</label>
                 <textarea id="project-notes" formControlName="internalNotes" rows="2" placeholder="Notas privadas del proyecto..."></textarea>
@@ -313,6 +310,7 @@ import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/expo
 })
 export class ProjectsComponent {
   auth = inject(AuthService);
+  private reports = inject(ReportService);
   private projectService = inject(ProjectService);
   private companyService = inject(CompanyService);
   private fb = inject(FormBuilder);
@@ -341,7 +339,6 @@ export class ProjectsComponent {
     progress: [0, [Validators.min(0), Validators.max(100)]],
     startDate: ['', Validators.required],
     endDate: ['', Validators.required],
-    budget: [0 as number | null],
     internalNotes: ['']
   }, {
     validators: (g: import('@angular/forms').AbstractControl) => {
@@ -368,21 +365,35 @@ export class ProjectsComponent {
 
   exportProjects(format: ExportFormat) {
     const rows = this.filteredProjects();
-    const columns = [
-      { header: 'Nombre', value: (p: typeof rows[number]) => p.name },
-      { header: 'Empresa', value: (p: typeof rows[number]) => this.getCompanyName(p.companyId) },
-      { header: 'Estado', value: (p: typeof rows[number]) => PROJECT_STATUS_LABELS[p.status] ?? p.status },
-      { header: 'Prioridad', value: (p: typeof rows[number]) => PRIORITY_LABELS[p.priority] ?? p.priority },
-      { header: 'Progreso (%)', value: (p: typeof rows[number]) => p.progress },
-      { header: 'Inicio', value: (p: typeof rows[number]) => p.startDate },
-      { header: 'Fin', value: (p: typeof rows[number]) => p.endDate },
-      { header: 'Presupuesto (Q)', value: (p: typeof rows[number]) => p.budget ?? 0 }
+    const prioTone: Record<string, ReportTone> = { critical: 'bad', high: 'warn', medium: 'info', low: 'muted' };
+    const healthTone: Record<string, ReportTone> = { ok: 'ok', upcoming: 'muted', risk: 'warn', late: 'bad', done: 'info', paused: 'muted' };
+    const date = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('es-GT', { day: '2-digit', month: 'short', year: 'numeric' }); };
+    const columns: ReportColumn<ProjectModel>[] = [
+      { header: 'Proyecto', value: p => p.name, width: 2.4 },
+      { header: 'Empresa', value: p => this.getCompanyName(p.companyId), width: 1.5 },
+      { header: 'Estado', value: p => PROJECT_STATUS_LABELS[p.status] ?? p.status, width: 1.1, align: 'center', tone: p => (p.status === 'completed' ? 'ok' : p.status === 'on_hold' ? 'muted' : 'info') },
+      { header: 'Prioridad', value: p => PRIORITY_LABELS[p.priority] ?? p.priority, width: 0.9, align: 'center', tone: p => prioTone[p.priority] },
+      { header: 'Avance', value: p => `${p.progress}%`, width: 0.8, align: 'center' },
+      { header: 'Salud', value: p => projectSchedule(p).label, width: 1, align: 'center', tone: p => healthTone[projectSchedule(p).tone] },
+      { header: 'Inicio', value: p => date(p.startDate), width: 1.1 },
+      { header: 'Entrega', value: p => date(p.endDate), width: 1.1 },
     ];
-    if (format === 'excel') {
-      exportToExcel('proyectos', columns, rows);
-    } else {
-      exportToPdf('Reporte de Proyectos', 'proyectos', columns, rows);
-    }
+    const active = rows.filter(p => p.status !== 'completed');
+    const atRisk = active.filter(p => ['risk', 'late'].includes(projectSchedule(p).tone)).length;
+    const statusLabel = this.statusFilter() ? PROJECT_STATUS_LABELS[this.statusFilter()] : '';
+    const company = this.companyFilter() ? this.getCompanyName(this.companyFilter()) : '';
+    this.reports.export(format, {
+      title: 'Reporte de proyectos',
+      subtitle: [statusLabel || 'Todos los estados', company || 'Todas las empresas', this.search().trim() && `Búsqueda: "${this.search().trim()}"`].filter(Boolean).join(' · '),
+      filename: 'proyectos',
+      columns, rows,
+      summary: [
+        { label: 'Proyectos', value: rows.length },
+        { label: 'En curso', value: active.length, tone: 'info' },
+        { label: 'Avance promedio (en curso)', value: active.length ? `${Math.round(active.reduce((s, p) => s + p.progress, 0) / active.length)}%` : '—' },
+        { label: 'En riesgo o atrasados', value: atRisk, tone: atRisk ? 'bad' : 'ok' },
+      ],
+    });
   }
 
   progressColor(pct: number) {
@@ -401,7 +412,7 @@ export class ProjectsComponent {
 
   editProject(p: Project) {
     this.editingId.set(p.id);
-    this.form.patchValue({ ...p, budget: p.budget ?? 0 });
+    this.form.patchValue(p);
     this.showModal.set(true);
   }
 
@@ -412,7 +423,7 @@ export class ProjectsComponent {
       name: v.name!, description: v.description!, companyId: v.companyId!,
       status: v.status as ProjectStatus, priority: v.priority as ProjectPriority, progress: v.progress ?? 0,
       startDate: v.startDate!, endDate: v.endDate!,
-      budget: v.budget ?? null, internalNotes: v.internalNotes || null,
+      internalNotes: v.internalNotes || null,
     };
     this.saving.set(true);
     try {

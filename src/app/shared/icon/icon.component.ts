@@ -8,7 +8,8 @@ export type IconName =
   | 'search' | 'user' | 'users' | 'calendar' | 'clock' | 'inbox'
   | 'dollar-sign' | 'message-circle' | 'clipboard' | 'paperclip' | 'tag'
   | 'file-text' | 'image' | 'archive' | 'download' | 'upload' | 'loader'
-  | 'send' | 'bell' | 'star' | 'external-link' | 'copy' | 'globe' | 'trending-up' | 'play';
+  | 'send' | 'bell' | 'star' | 'external-link' | 'copy' | 'globe' | 'trending-up' | 'play'
+  | 'lightbulb' | 'help-circle';
 
 @Component({
   selector: 'app-icon',
@@ -208,6 +209,14 @@ export type IconName =
         @case ('play') {
           <circle cx="12" cy="12" r="10" />
           <path d="m10 8 6 4-6 4V8Z" />
+        }
+        @case ('lightbulb') {
+          <path d="M9 18h6M10 22h4" />
+          <path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z" />
+        }
+        @case ('help-circle') {
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01" />
         }
         @case ('star') {
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26" />

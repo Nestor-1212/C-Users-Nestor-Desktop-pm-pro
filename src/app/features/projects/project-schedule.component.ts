@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Project, ProjectStage, ProjectTask, ScheduleVisibility, TaskOwner } from '../../core/models';
@@ -6,7 +6,7 @@ import { ProjectService, ProjectTaskInput } from '../../core/services/project.se
 import { apiErrorMessage } from '../../core/http/api-error';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { NotificationService } from '../../shared/services/notification.service';
-import { exportToExcel, exportToPdf, ExportColumn } from '../../shared/utils/export.util';
+import { ReportService, ReportColumn, ReportTone } from '../../shared/services/report.service';
 import { fileIcon, formatFileSize, MAX_DOCUMENT_SIZE } from '../../shared/utils/file.util';
 
 type Zoom = 'weeks' | 'months';
@@ -19,6 +19,8 @@ interface StageRow {
   end?: string;
   tasks: ProjectTask[];
 }
+
+type CardTarget = { kind: 'stage'; row: StageRow } | { kind: 'task'; task: ProjectTask; stage: string };
 
 interface ExportRow { stage: string; task: ProjectTask | null; progress: number; start: string; end: string; }
 
@@ -185,7 +187,7 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
             }
           </div>
 
-          <div class="gantt-scroll">
+          <div class="gantt-scroll" (scroll)="hideCard()">
             <div class="timeline" [style.width.px]="timelineWidth()">
               <div class="head-cell timeline-head">
                 @for (m of monthTicks(); track m.left) {
@@ -208,7 +210,10 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
                 <div class="bar-row stage-row">
                   @if (r.start && r.end) {
                     <div class="bar stage-bar" [style.left.px]="x(r.start)" [style.width.px]="w(r.start, r.end)"
-                      [title]="r.stage.name + ' · ' + r.stage.progress + '%'">
+                      tabindex="0" role="button" [attr.aria-label]="'Ver tareas de la etapa ' + r.stage.name"
+                      (mouseenter)="showCard($event, { kind: 'stage', row: r })" (mousemove)="followMouse($event)" (mouseleave)="scheduleHide()"
+                      (focus)="showCard($event, { kind: 'stage', row: r })" (blur)="scheduleHide()"
+                      (click)="toggleCard($event, { kind: 'stage', row: r })">
                       <div class="fill" [style.width.%]="r.stage.progress"></div>
                     </div>
                   }
@@ -220,15 +225,19 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
                         <span class="diamond" [class.done]="t.progress >= 100" [class.client]="t.owner === 'client'"
                           [class.late]="taskState(t) === 'late'"
                           [style.left.px]="x(t.startDate) + pxPerDay() / 2"
-                          [title]="t.name + ' · ' + (t.startDate | date:'d MMM y')"
-                          (click)="canEdit() && openTaskForm(t)"></span>
+                          tabindex="0" role="button" [attr.aria-label]="'Hito ' + t.name"
+                          (mouseenter)="showCard($event, { kind: 'task', task: t, stage: r.stage.name })" (mouseleave)="scheduleHide()"
+                          (focus)="showCard($event, { kind: 'task', task: t, stage: r.stage.name })" (blur)="scheduleHide()"
+                          (click)="canEdit() ? editFromCard(t) : toggleCard($event, { kind: 'task', task: t, stage: r.stage.name })"></span>
                         <span class="ms-label" [style.left.px]="x(t.startDate) + pxPerDay() / 2 + 12">{{ t.startDate | date:'d MMM' }}</span>
                       } @else {
                         <div class="bar task-bar" [class]="t.owner + ' ' + taskState(t)" [class.hidden-task]="!t.visibleToClient"
                           [class.clickable]="canEdit()"
                           [style.left.px]="x(t.startDate)" [style.width.px]="w(t.startDate, t.endDate)"
-                          [title]="t.name + ' · ' + (t.startDate | date:'d MMM') + ' – ' + (t.endDate | date:'d MMM') + ' · ' + t.progress + '%'"
-                          (click)="canEdit() && openTaskForm(t)">
+                          tabindex="0" role="button" [attr.aria-label]="'Tarea ' + t.name"
+                          (mouseenter)="showCard($event, { kind: 'task', task: t, stage: r.stage.name })" (mousemove)="followMouse($event)" (mouseleave)="scheduleHide()"
+                          (focus)="showCard($event, { kind: 'task', task: t, stage: r.stage.name })" (blur)="scheduleHide()"
+                          (click)="canEdit() ? editFromCard(t) : toggleCard($event, { kind: 'task', task: t, stage: r.stage.name })">
                           <div class="fill" [style.width.%]="t.progress"></div>
                           <span class="bar-pct">{{ t.progress }}%</span>
                         </div>
@@ -263,6 +272,56 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
             </div>
           }
         </div>
+
+        <!-- Tarjeta flotante: detalle de la etapa o tarea bajo el cursor -->
+        @if (card(); as c) {
+          <div class="hover-card" role="tooltip" [class.above]="c.above" [style.left.px]="c.x" [style.top.px]="c.y"
+            (mouseenter)="cancelHide()" (mouseleave)="scheduleHide()">
+            @if (c.target.kind === 'stage') {
+              @let r = c.target.row;
+              <div class="hc-head">
+                <strong>{{ r.stage.name }}</strong>
+                <span class="hc-pct">{{ r.stage.progress }}%</span>
+              </div>
+              <span class="hc-sub">
+                @if (r.start && r.end) { {{ r.start | date:'d MMM' }} – {{ r.end | date:'d MMM y' }} · }
+                {{ r.tasks.length }} {{ r.tasks.length === 1 ? 'actividad' : 'actividades' }}
+              </span>
+              <div class="hc-bar"><div [style.width.%]="r.stage.progress"></div></div>
+              <ul class="hc-list">
+                @for (t of r.tasks.slice(0, 8); track t.id) {
+                  <li [class.internal]="!t.visibleToClient" [class.editable]="canEdit()" (click)="canEdit() && editFromCard(t)">
+                    @if (t.isMilestone) { <span class="hc-diamond" [class.done]="t.progress >= 100"></span> }
+                    @else { <span class="hc-dot" [class]="t.owner"></span> }
+                    <span class="hc-name">{{ t.name }}<small>{{ t.startDate | date:'d MMM' }}{{ t.isMilestone ? '' : ' – ' + (t.endDate | date:'d MMM') }}{{ t.owner === 'client' ? ' · ' + (canEdit() ? 'Cliente' : 'Ustedes') : '' }}</small></span>
+                    <span class="hc-state" [class]="taskState(t)">{{ t.isMilestone ? (t.progress >= 100 ? 'Cumplido' : 'Pendiente') : stateLabel(t) }}</span>
+                  </li>
+                } @empty {
+                  <li class="hc-empty">Esta etapa todavía no tiene tareas.</li>
+                }
+              </ul>
+              @if (r.tasks.length > 8) { <span class="hc-more">+{{ r.tasks.length - 8 }} más · despliega la etapa para verlas todas</span> }
+            } @else {
+              @let t = c.target.task;
+              <div class="hc-head">
+                <strong>{{ t.name }}</strong>
+                <span class="hc-type">{{ t.isMilestone ? 'Hito' : 'Tarea' }}</span>
+              </div>
+              <span class="hc-sub">Etapa: {{ c.target.stage }}</span>
+              <dl class="hc-facts">
+                <div><dt>{{ t.isMilestone ? 'Fecha' : 'Fechas' }}</dt><dd>{{ t.startDate | date:'d MMM y' }}{{ t.isMilestone ? '' : ' – ' + (t.endDate | date:'d MMM y') }}</dd></div>
+                <div><dt>Responsable</dt><dd>{{ t.owner === 'client' ? (canEdit() ? 'Cliente' : 'Ustedes') : '3TECH' }}</dd></div>
+                <div><dt>Estado</dt><dd><span class="hc-state" [class]="taskState(t)">{{ t.isMilestone ? (t.progress >= 100 ? 'Cumplido' : 'Pendiente') : stateLabel(t) }}</span></dd></div>
+              </dl>
+              @if (!t.isMilestone) {
+                <div class="hc-bar"><div [style.width.%]="t.progress"></div></div>
+                <span class="hc-sub">{{ t.progress }}% completado</span>
+              }
+              @if (canEdit() && !t.visibleToClient) { <span class="hc-internal"><app-icon name="eye-off" [size]="12" /> Interna: el cliente no la ve</span> }
+            }
+            @if (canEdit()) { <span class="hc-hint">{{ c.target.kind === 'stage' ? 'Clic en una tarea para editarla' : 'Clic para editar' }}</span> }
+          </div>
+        }
 
         <!-- Leyenda -->
         <div class="legend">
@@ -385,6 +444,46 @@ const emptyTask = (stageId: string): ProjectTaskInput => ({
     .lg-diamond { width: 9px; height: 9px; transform: rotate(45deg); border: 2px solid #0f4b92; display: inline-block; }
     .lg-today { width: 2px; height: 14px; background: #ef4444; display: inline-block; }
 
+    .stage-bar, .task-bar, .diamond { outline: none; }
+    .stage-bar { cursor: pointer; }
+    .stage-bar:hover, .stage-bar:focus-visible { box-shadow: 0 0 0 3px rgba(15,75,146,0.25); }
+    .task-bar:focus-visible, .diamond:focus-visible { box-shadow: 0 0 0 3px rgba(15,75,146,0.35); }
+
+    .hover-card { position: fixed; z-index: 300; width: 320px; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 16px; box-shadow: 0 18px 44px -12px rgba(15,23,42,0.3), 0 2px 6px rgba(15,23,42,0.06); display: flex; flex-direction: column; gap: 6px; animation: hc-in 0.12s ease; }
+    .hover-card.above { transform: translateY(-100%); }
+    @keyframes hc-in { from { opacity: 0; } to { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .hover-card { animation: none; } }
+    .hc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .hc-head strong { font-size: 14.5px; color: #0f172a; line-height: 1.3; }
+    .hc-pct { font-size: 15px; font-weight: 800; color: #0f4b92; }
+    .hc-type { font-size: 11px; font-weight: 700; background: #eef4fc; color: #0f4b92; padding: 1px 8px; border-radius: 999px; flex-shrink: 0; }
+    .hc-sub { font-size: 12px; color: #64748b; }
+    .hc-bar { height: 6px; background: #f1f5f9; border-radius: 999px; overflow: hidden; margin: 2px 0; }
+    .hc-bar div { height: 100%; background: #0f4b92; border-radius: 999px; }
+    .hc-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid #f1f5f9; }
+    .hc-list li { display: flex; align-items: center; gap: 9px; padding: 7px 0; border-bottom: 1px solid #f8fafc; }
+    .hc-list li.internal { opacity: 0.6; }
+    .hc-list li.editable { cursor: pointer; border-radius: 8px; margin: 0 -6px; padding: 7px 6px; }
+    .hc-list li.editable:hover { background: #f8fafc; }
+    .hc-dot { width: 8px; height: 8px; border-radius: 50%; background: #1465c5; flex-shrink: 0; }
+    .hc-dot.client { background: #e99d34; }
+    .hc-diamond { width: 8px; height: 8px; transform: rotate(45deg); border: 2px solid #0f4b92; background: #fff; flex-shrink: 0; }
+    .hc-diamond.done { background: #a9c238; border-color: #a9c238; }
+    .hc-name { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; color: #0f172a; font-weight: 600; }
+    .hc-name small { font-size: 11.5px; color: #94a3b8; font-weight: 500; }
+    .hc-state { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #f1f5f9; color: #64748b; white-space: nowrap; }
+    .hc-state.done { background: #f2f7e1; color: #5b6b12; }
+    .hc-state.late { background: #fee2e2; color: #dc2626; }
+    .hc-state.active { background: #eef4fc; color: #0f4b92; }
+    .hc-empty { font-size: 12.5px; color: #94a3b8; justify-content: center; }
+    .hc-more { font-size: 11.5px; color: #64748b; }
+    .hc-facts { margin: 4px 0; display: flex; flex-direction: column; gap: 5px; }
+    .hc-facts div { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; }
+    .hc-facts dt { color: #64748b; }
+    .hc-facts dd { margin: 0; color: #0f172a; font-weight: 600; text-align: right; }
+    .hc-internal { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #64748b; }
+    .hc-hint { font-size: 11px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 6px; margin-top: 2px; }
+
     .mobile-list { display: none; }
     .m-stage { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
     .m-stage-head { display: flex; justify-content: space-between; font-size: 14px; }
@@ -409,9 +508,72 @@ export class ProjectScheduleComponent {
   canEdit = input(false);
 
   private projectService = inject(ProjectService);
+  private reports = inject(ReportService);
   private notify = inject(NotificationService);
 
   visibilityOptions = VISIBILITY_OPTIONS;
+
+  // ── Tarjeta flotante del Gantt ──
+  card = signal<{ target: CardTarget; x: number; y: number; above: boolean } | null>(null);
+  private hideTimer?: ReturnType<typeof setTimeout>;
+  private readonly CARD_W = 320;
+  private readonly CARD_H = 300;
+
+  constructor() {
+    // Si la página se desplaza, la tarjeta (posición fija) ya no estaría junto a su barra.
+    const onScroll = () => this.hideCard();
+    document.addEventListener('scroll', onScroll, true);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') this.hideCard(); };
+    document.addEventListener('keydown', onKey);
+    inject(DestroyRef).onDestroy(() => {
+      document.removeEventListener('scroll', onScroll, true);
+      document.removeEventListener('keydown', onKey);
+      clearTimeout(this.hideTimer);
+    });
+  }
+
+  /** Coloca la tarjeta bajo la barra (o encima si no cabe), cerca del cursor y dentro de la pantalla. */
+  showCard(event: MouseEvent | FocusEvent, target: CardTarget) {
+    this.cancelHide();
+    const el = event.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const anchorX = event instanceof MouseEvent && event.clientX ? event.clientX : rect.left + Math.min(rect.width, 200) / 2;
+    const x = Math.min(Math.max(anchorX - this.CARD_W / 2, 8), window.innerWidth - this.CARD_W - 8);
+    const above = rect.bottom + 8 + this.CARD_H > window.innerHeight && rect.top - 8 - this.CARD_H > 0;
+    this.card.set({ target, x, y: above ? rect.top - 8 : rect.bottom + 8, above });
+  }
+
+  /** En barras muy largas, la tarjeta acompaña al cursor horizontalmente. */
+  followMouse(event: MouseEvent) {
+    const c = this.card();
+    if (!c) return;
+    const x = Math.min(Math.max(event.clientX - this.CARD_W / 2, 8), window.innerWidth - this.CARD_W - 8);
+    if (Math.abs(x - c.x) > 24) this.card.set({ ...c, x });
+  }
+
+  /** Pantallas táctiles (sin hover): tocar la barra abre o cierra la tarjeta. */
+  toggleCard(event: MouseEvent, target: CardTarget) {
+    const c = this.card();
+    const same = c && c.target.kind === target.kind &&
+      (target.kind === 'stage' ? c.target.kind === 'stage' && c.target.row.key === target.row.key : c.target.kind === 'task' && c.target.task.id === target.task.id);
+    if (same) this.hideCard(); else this.showCard(event, target);
+  }
+
+  scheduleHide() {
+    clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(() => this.card.set(null), 180);
+  }
+  cancelHide() { clearTimeout(this.hideTimer); }
+  hideCard() { clearTimeout(this.hideTimer); this.card.set(null); }
+
+  editFromCard(t: ProjectTask) {
+    this.hideCard();
+    this.openTaskForm(t);
+  }
+
+  stateLabel(t: ProjectTask): string {
+    return { done: 'Terminada', late: 'Atrasada', active: 'En curso', pending: 'Pendiente' }[this.taskState(t)];
+  }
   zoom = signal<Zoom>('weeks');
   collapsed = signal(new Set<string>());
   saving = signal(false);
@@ -584,28 +746,51 @@ export class ProjectScheduleComponent {
     ]);
   }
 
-  private exportColumns(): ExportColumn<ExportRow>[] {
+  private exportColumns(): ReportColumn<ExportRow>[] {
     const ownerLabel = (o: TaskOwner) => (o === 'client' ? 'Cliente' : '3TECH');
-    const cols: ExportColumn<ExportRow>[] = [
-      { header: 'Etapa', value: r => r.stage },
-      { header: 'Actividad', value: r => r.task?.name ?? '(etapa completa)' },
-      { header: 'Tipo', value: r => (!r.task ? 'Etapa' : r.task.isMilestone ? 'Hito' : 'Tarea') },
-      { header: 'Responsable', value: r => (r.task ? ownerLabel(r.task.owner) : '') },
-      { header: 'Inicio', value: r => r.start },
-      { header: 'Fin', value: r => r.end },
-      { header: 'Avance', value: r => `${r.progress}%` },
-      { header: 'Estado', value: r => (r.task ? { done: 'Terminada', late: 'Atrasada', active: 'En curso', pending: 'Pendiente' }[this.taskState(r.task)] : '') },
+    const stateTone: Record<string, ReportTone> = { done: 'ok', late: 'bad', active: 'info', pending: 'muted' };
+    const date = (iso: string) => { if (!iso) return ''; const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('es-GT', { day: '2-digit', month: 'short', year: 'numeric' }); };
+    const cols: ReportColumn<ExportRow>[] = [
+      { header: 'Etapa', value: r => r.stage, width: 1.1, tone: r => (r.task ? null : 'info') },
+      { header: 'Actividad', value: r => r.task?.name ?? 'Etapa completa', width: 2.4 },
+      { header: 'Tipo', value: r => (!r.task ? 'Etapa' : r.task.isMilestone ? 'Hito' : 'Tarea'), width: 0.8, align: 'center' },
+      { header: 'Responsable', value: r => (r.task ? ownerLabel(r.task.owner) : ''), width: 1, align: 'center', tone: r => (r.task?.owner === 'client' ? 'warn' : null) },
+      { header: 'Inicio', value: r => date(r.start), width: 1 },
+      { header: 'Fin', value: r => date(r.end), width: 1 },
+      { header: 'Avance', value: r => `${r.progress}%`, width: 0.8, align: 'center' },
+      { header: 'Estado', value: r => (r.task ? { done: 'Terminada', late: 'Atrasada', active: 'En curso', pending: 'Pendiente' }[this.taskState(r.task)] : ''), width: 1, align: 'center', tone: r => (r.task ? stateTone[this.taskState(r.task)] : null) },
     ];
-    if (this.canEdit()) cols.push({ header: 'Visible al cliente', value: r => (r.task ? (r.task.visibleToClient ? 'Sí' : 'No') : '') });
+    if (this.canEdit()) cols.push({ header: 'Visible al cliente', value: r => (r.task ? (r.task.visibleToClient ? 'Sí' : 'No') : ''), width: 0.9, align: 'center' });
     return cols;
+  }
+
+  private exportReport(format: 'excel' | 'pdf') {
+    const p = this.project();
+    const tasks = p.tasks.filter(t => !t.isMilestone);
+    const milestones = p.tasks.filter(t => t.isMilestone);
+    const late = p.tasks.filter(t => this.taskState(t) === 'late').length;
+    const fmt = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('es-GT', { day: 'numeric', month: 'long', year: 'numeric' }); };
+    this.reports.export(format, {
+      title: `Cronograma · ${p.name}`,
+      subtitle: `Del ${fmt(p.startDate)} al ${fmt(p.endDate)}`,
+      filename: this.fileName(),
+      columns: this.exportColumns(),
+      rows: this.exportRows(),
+      summary: [
+        { label: 'Avance general', value: `${p.progress}%`, tone: 'info' },
+        { label: 'Tareas', value: tasks.length },
+        { label: 'Hitos cumplidos', value: `${milestones.filter(m => m.progress >= 100).length} de ${milestones.length}` },
+        { label: 'Atrasadas', value: late, tone: late ? 'bad' : 'ok' },
+      ],
+    });
   }
 
   private fileName() {
     return `cronograma-${this.project().name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-')}`;
   }
 
-  exportExcel() { exportToExcel(this.fileName(), this.exportColumns(), this.exportRows()); }
-  exportPdf() { exportToPdf(`Cronograma · ${this.project().name}`, this.fileName(), this.exportColumns(), this.exportRows()); }
+  exportExcel() { this.exportReport('excel'); }
+  exportPdf() { this.exportReport('pdf'); }
 
   fileIcon = fileIcon;
   formatFileSize = formatFileSize;

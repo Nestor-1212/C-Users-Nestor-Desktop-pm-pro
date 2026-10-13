@@ -82,6 +82,12 @@ import { IconComponent } from '../icon/icon.component';
             </span>
             <span class="nav-label">Tickets</span>
           </a>
+          @if (auth.isClient()) {
+            <a routerLink="/aprende" routerLinkActive="active" class="nav-item" aria-label="Aprende a pedir soporte" (click)="mobileOpen.set(false)">
+              <span class="nav-icon-wrap"><app-icon name="lightbulb" [size]="18" class="nav-icon" /></span>
+              <span class="nav-label">Aprende</span>
+            </a>
+          }
         </nav>
 
         <div class="sidebar-footer">

@@ -27,7 +27,10 @@ const PLAN_FROM_API: Record<string, CompanyPlan> = { BASIC: 'Basic', STANDARD: '
 export const planToApi = (plan: CompanyPlan) => plan.toUpperCase();
 
 export function toUser(u: Api): User {
-  return { id: u.id, username: u.username, role: lower(u.role), companyId: opt(u.companyId), name: u.name, email: u.email };
+  return {
+    id: u.id, username: u.username, role: lower(u.role), companyId: opt(u.companyId), name: u.name, email: u.email,
+    lastLoginAt: opt(u.lastLoginAt),
+  };
 }
 
 export function toCompany(c: Api): Company {
@@ -94,7 +97,6 @@ export function toProject(p: Api): Project {
     id: p.id, name: p.name, description: p.description, companyId: p.companyId,
     status: lower(p.status), priority: lower(p.priority), progress: p.progress,
     startDate: dateOnly(p.startDate), endDate: dateOnly(p.endDate),
-    budget: p.budget != null ? Number(p.budget) : undefined,
     internalNotes: opt(p.internalNotes), tags: p.tags ?? [],
     scheduleVisibility: lower(p.scheduleVisibility ?? 'FULL'),
     createdAt: p.createdAt, updatedAt: p.updatedAt,
@@ -143,9 +145,9 @@ export function toTicket(t: Api): Ticket {
     assignedTo: t.assignedTo ? { id: t.assignedTo.id, name: t.assignedTo.name, role: lower(t.assignedTo.role) } : undefined,
     resolvedByName: opt(t.resolvedByName),
     lastResponse: t.lastResponse
-      ? { authorName: t.lastResponse.authorName, authorRole: side(t.lastResponse.authorRole), createdAt: t.lastResponse.createdAt }
+      ? { authorName: t.lastResponse.authorName, authorRole: side(t.lastResponse.authorRole), createdAt: t.lastResponse.createdAt, content: t.lastResponse.content }
       : responses.length
-        ? { authorName: responses[responses.length - 1].authorName, authorRole: responses[responses.length - 1].authorRole, createdAt: responses[responses.length - 1].createdAt }
+        ? { authorName: responses[responses.length - 1].authorName, authorRole: responses[responses.length - 1].authorRole, createdAt: responses[responses.length - 1].createdAt, content: responses[responses.length - 1].content.slice(0, 160) }
         : undefined,
   };
 }

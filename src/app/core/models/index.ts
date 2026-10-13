@@ -12,6 +12,8 @@ export interface User {
   companyId?: string;
   name: string;
   email: string;
+  /** Último inicio de sesión (solo en la gestión de usuarios). */
+  lastLoginAt?: string;
 }
 
 export type CompanyPlan = 'Basic' | 'Standard' | 'Premium';
@@ -77,7 +79,6 @@ export interface Project {
   priority: ProjectPriority;
   startDate: string;
   endDate: string;
-  budget?: number;
   internalNotes?: string;
   tags?: string[];
   scheduleVisibility: ScheduleVisibility;
@@ -220,5 +221,5 @@ export interface Ticket {
   /** Quién lo marcó como resuelto/cerrado. */
   resolvedByName?: string;
   /** Última respuesta (viene en la lista): indica de quién es el turno. */
-  lastResponse?: { authorName: string; authorRole: 'owner' | 'client'; createdAt: string };
+  lastResponse?: { authorName: string; authorRole: 'owner' | 'client'; createdAt: string; content?: string };
 }

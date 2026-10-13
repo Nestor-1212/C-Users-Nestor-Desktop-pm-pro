@@ -13,9 +13,10 @@ import { isControlInvalid } from '../../shared/utils/form.util';
 import { Ticket, TicketPriority, TicketStatus } from '../../core/models';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { fileIcon, formatFileSize, MAX_ATTACHMENT_SIZE } from '../../shared/utils/file.util';
-import { exportToExcel, exportToPdf } from '../../shared/utils/export.util';
+import { ReportService, ReportColumn, ReportTone } from '../../shared/services/report.service';
 import { TicketStatusLabelPipe, PriorityLabelPipe, TICKET_STATUS_LABELS, CATEGORY_LABELS, PRIORITY_LABELS } from '../../shared/pipes/labels.pipe';
 import { ExportMenuComponent, ExportFormat } from '../../shared/export-menu/export-menu.component';
+import { ClientTicketsComponent } from './client-tickets.component';
 
 type View = 'company' | 'board' | 'list';
 type Bucket = 'attention' | 'progress' | 'closed' | 'all';
@@ -40,9 +41,10 @@ function span(ms: number): string {
 @Component({
   selector: 'app-tickets',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink, IconComponent, ModalFocusTrapDirective, TicketStatusLabelPipe, PriorityLabelPipe, ExportMenuComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, IconComponent, ModalFocusTrapDirective, TicketStatusLabelPipe, PriorityLabelPipe, ExportMenuComponent, ClientTicketsComponent],
   template: `
     <div class="tickets-page">
+      @if (auth.isStaff()) {
       <div class="page-header">
         <div>
           <h1>{{ auth.isStaff() ? 'Centro de Tickets' : 'Mis Tickets de Soporte' }}</h1>
@@ -119,6 +121,7 @@ function span(ms: number): string {
           <option value="low">Baja</option>
         </select>
       </div>
+      }
 
       <!-- Fila de ticket reutilizable -->
       <ng-template #ticketRow let-t>
@@ -279,31 +282,8 @@ function span(ms: number): string {
           }
         }
       } @else {
-        <!-- Vista del cliente: agrupado según de quién es el turno -->
-        <div class="client-sections">
-          @for (sec of clientSections(); track sec.key) {
-            @if (sec.tickets.length) {
-              <section class="c-section">
-                <h2 [class]="sec.key">
-                  <app-icon [name]="sec.icon" [size]="16" /> {{ sec.title }} <span class="count">{{ sec.tickets.length }}</span>
-                </h2>
-                <p class="c-hint">{{ sec.hint }}</p>
-                <div class="group-body boxed">
-                  @for (t of sec.tickets; track t.id) {
-                    <ng-container *ngTemplateOutlet="ticketRow; context: { $implicit: t }" />
-                  }
-                </div>
-              </section>
-            }
-          }
-          @if (!scopedTickets().length) {
-            <div class="empty-state">
-              <div class="empty-icon"><app-icon name="ticket" [size]="32" /></div>
-              <h3>Sin tickets</h3>
-              <p>No tienes tickets que coincidan. Si algo falla, crea uno con "Nuevo Ticket".</p>
-            </div>
-          }
-        </div>
+        <!-- Vista del cliente: centro de soporte con bandeja y conversación -->
+        <app-client-tickets [focusId]="createdId()" (create)="openModal()" />
       }
     </div>
 
@@ -313,7 +293,7 @@ function span(ms: number): string {
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ticket-modal-title"
           appModalFocusTrap (closeRequested)="closeModal()" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h2 id="ticket-modal-title">Nuevo Ticket de Soporte</h2>
+            <h2 id="ticket-modal-title">Nueva solicitud de soporte</h2>
             <button class="modal-close" (click)="closeModal()" aria-label="Cerrar">
               <app-icon name="x" [size]="18" />
             </button>
@@ -495,14 +475,6 @@ function span(ms: number): string {
     .status-select { padding: 4px 6px; font-size: 12.5px; font-weight: 600; font-family: inherit; }
     .t-table .table-empty { text-align: center; color: #64748b; padding: 24px; }
 
-    /* Cliente */
-    .client-sections { display: flex; flex-direction: column; gap: 22px; }
-    .c-section h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 800; margin: 0; color: #0f172a; }
-    .c-section h2 .count { background: #f1f5f9; border-radius: 999px; padding: 1px 9px; font-size: 12px; color: #475569; }
-    .c-section h2.answered app-icon { color: #e99d34; }
-    .c-section h2.waiting app-icon { color: #1465c5; }
-    .c-section h2.done app-icon { color: #a9c238; }
-    .c-hint { font-size: 13px; color: #64748b; margin: 2px 0 10px; }
 
     .form-group { margin-bottom: 16px; }
     .form-group label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
@@ -533,6 +505,7 @@ function span(ms: number): string {
 })
 export class TicketsComponent {
   auth = inject(AuthService);
+  private reports = inject(ReportService);
   ticketService = inject(TicketService);
   private companyService = inject(CompanyService);
   userService = inject(UserService);
@@ -559,6 +532,8 @@ export class TicketsComponent {
   draggedId = signal<string | null>(null);
   dragOverCol = signal<TicketStatus | null>(null);
   showModal = signal(false);
+  /** Último ticket creado por el cliente, para seleccionarlo en su bandeja. */
+  createdId = signal<string | null>(null);
   saving = signal(false);
   selectedAttachment = signal<File | null>(null);
   /** Reloj para que las cuentas regresivas del SLA se actualicen solas. */
@@ -569,6 +544,17 @@ export class TicketsComponent {
       ...(this.auth.isStaff() ? [this.userService.loadStaff()] : []));
     const timer = setInterval(() => this.now.set(Date.now()), 60_000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
+
+    // Viene del tutorial "Aprende": abre el formulario con la solicitud que practicó.
+    const draft = (history.state as { ticketDraft?: Partial<{ title: string; description: string; category: string; priority: string }> } | null)?.ticketDraft;
+    if (draft && this.auth.isClient()) {
+      queueMicrotask(() => {
+        this.openModal();
+        this.form.patchValue(draft);
+        this.notify.success('Tu práctica ya está en el formulario. Revísala, adjunta tu captura y envíala.');
+      });
+      history.replaceState({ ...history.state, ticketDraft: null }, '');
+    }
   }
 
   fileIcon = fileIcon;
@@ -649,18 +635,6 @@ export class TicketsComponent {
     return { status, tickets, shown: ordered.slice(0, BOARD_LIMIT) };
   }));
 
-  clientSections = computed(() => {
-    const list = this.scopedTickets();
-    const sections: { key: string; title: string; hint: string; icon: IconName; tickets: Ticket[] }[] = [
-      { key: 'answered', title: 'Te respondimos, revisa', hint: 'El equipo de 3TECH ya contestó; revisa la respuesta o confírmanos si quedó resuelto.', icon: 'message-circle',
-        tickets: list.filter(t => !isClosed(t) && t.lastResponse?.authorRole === 'owner') },
-      { key: 'waiting', title: 'Esperando respuesta de 3TECH', hint: 'Estamos trabajando en ellos dentro de tu tiempo de respuesta garantizado.', icon: 'clock',
-        tickets: list.filter(t => !isClosed(t) && t.lastResponse?.authorRole !== 'owner') },
-      { key: 'done', title: 'Resueltos', hint: 'Si aún no lo hiciste, califica la atención que recibiste.', icon: 'check',
-        tickets: list.filter(isClosed).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) },
-    ];
-    return sections;
-  });
 
   bucketCount(b: Bucket): number {
     return this.scopedTickets().filter(t => this.inBucket(t, b)).length;
@@ -814,26 +788,51 @@ export class TicketsComponent {
   }
 
   exportTickets(format: ExportFormat) {
-    const rows = this.auth.isStaff() && this.view() !== 'board' ? this.bucketTickets() : this.scopedTickets();
-    const columns = [
-      { header: 'ID', value: (t: Ticket) => t.id },
-      { header: 'Título', value: (t: Ticket) => t.title },
-      { header: 'Empresa', value: (t: Ticket) => t.companyName },
-      { header: 'Creado por', value: (t: Ticket) => t.createdByName ?? '' },
-      { header: 'Responsable', value: (t: Ticket) => t.assignedTo?.name ?? 'Sin asignar' },
-      { header: 'Resuelto por', value: (t: Ticket) => t.resolvedByName ?? '' },
-      { header: 'Categoría', value: (t: Ticket) => CATEGORY_LABELS[t.category] ?? t.category },
-      { header: 'Prioridad', value: (t: Ticket) => PRIORITY_LABELS[t.priority] ?? t.priority },
-      { header: 'Estado', value: (t: Ticket) => TICKET_STATUS_LABELS[t.status] ?? t.status },
-      { header: 'Creado', value: (t: Ticket) => new Date(t.createdAt).toLocaleString('es-GT') },
-      { header: 'SLA límite', value: (t: Ticket) => new Date(t.slaDeadline).toLocaleString('es-GT') },
-      { header: 'Respuestas', value: (t: Ticket) => t.responseCount }
+    const rows = this.view() !== 'board' ? this.bucketTickets() : this.scopedTickets();
+    const prioTone: Record<string, ReportTone> = { critical: 'bad', high: 'warn', medium: 'info', low: 'muted' };
+    const statusTone = (t: Ticket): ReportTone =>
+      isClosed(t) ? 'ok' : t.status === 'escalated' ? 'bad' : t.status === 'in_review' ? 'info' : 'warn';
+    const slaTone = (t: Ticket): ReportTone =>
+      this.ticketService.isSlaBreached(t) ? 'bad' : this.ticketService.slaMet(t) === false ? 'warn' : this.ticketService.slaMet(t) ? 'ok' : 'info';
+    const date = (iso: string) => new Date(iso).toLocaleString('es-GT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const columns: ReportColumn<Ticket>[] = [
+      { header: '#', value: t => t.id, width: 0.6 },
+      { header: 'Ticket', value: t => t.title, width: 2.4 },
+      { header: 'Empresa', value: t => t.companyName, width: 1.4 },
+      { header: 'Creado por', value: t => t.createdByName ?? '—', width: 1.2 },
+      { header: 'Responsable', value: t => t.assignedTo?.name ?? 'Sin asignar', width: 1.2, tone: t => (t.assignedTo ? null : 'warn') },
+      { header: 'Categoría', value: t => CATEGORY_LABELS[t.category] ?? t.category, width: 1.3 },
+      { header: 'Prioridad', value: t => PRIORITY_LABELS[t.priority] ?? t.priority, width: 0.9, align: 'center', tone: t => prioTone[t.priority] },
+      { header: 'Estado', value: t => TICKET_STATUS_LABELS[t.status] ?? t.status, width: 1, align: 'center', tone: statusTone },
+      { header: 'Primera respuesta (SLA)', value: t => this.sla(t).label, width: 1.7, tone: slaTone },
+      { header: 'Creado', value: t => date(t.createdAt), width: 1.3 },
     ];
-    if (format === 'excel') {
-      exportToExcel('tickets', columns, rows);
-    } else {
-      exportToPdf('Reporte de Tickets', 'tickets', columns, rows);
-    }
+    // Contexto: qué filtros estaban activos al exportar.
+    const company = this.companiesWithTickets().find(c => c.id === this.companyFilter())?.name;
+    const af = this.assigneeFilter();
+    const assignee = af === 'me' ? 'Asignados a mí' : af === 'none' ? 'Sin asignar' : this.userService.staff().find(m => m.id === af)?.name;
+    const context = [
+      this.view() !== 'board' ? this.buckets.find(b => b.value === this.bucket())?.label : 'Todos los estados',
+      company, assignee && `Responsable: ${assignee}`,
+      this.priorityFilter() && `Prioridad: ${PRIORITY_LABELS[this.priorityFilter()]}`,
+      this.search().trim() && `Búsqueda: "${this.search().trim()}"`,
+    ].filter(Boolean).join(' · ');
+    const answered = rows.filter(t => this.ticketService.slaMet(t) !== null);
+    const onTime = answered.filter(t => this.ticketService.slaMet(t)).length;
+    const breached = rows.filter(t => this.ticketService.isSlaBreached(t)).length;
+    const unassigned = rows.filter(t => !isClosed(t) && !t.assignedTo).length;
+    this.reports.export(format, {
+      title: 'Reporte de tickets',
+      subtitle: context,
+      filename: 'tickets',
+      columns, rows,
+      summary: [
+        { label: 'Tickets en el reporte', value: rows.length },
+        { label: 'Sin respuesta y vencidos', value: breached, tone: breached ? 'bad' : 'ok' },
+        { label: 'Respondidos a tiempo', value: answered.length ? `${Math.round((onTime / answered.length) * 100)}%` : '—', tone: 'info' },
+        { label: 'Sin responsable', value: unassigned, tone: unassigned ? 'warn' : 'ok' },
+      ],
+    });
   }
 
   async createTicket() {
@@ -848,6 +847,7 @@ export class TicketsComponent {
         priority: v.priority as TicketPriority,
       }, this.selectedAttachment() ?? undefined);
       this.closeModal();
+      this.createdId.set(ticket.id);
       this.notify.success(`Ticket creado correctamente. Te responderemos antes de ${this.ticketService.getSlaTotalHours(ticket)} horas.`);
     } catch (err) {
       this.notify.error(apiErrorMessage(err));
