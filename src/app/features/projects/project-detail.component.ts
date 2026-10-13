@@ -7,6 +7,8 @@ import { AuthService } from '../../core/services/auth.service';
 import { ProjectService } from '../../core/services/project.service';
 import { CompanyService } from '../../core/services/company.service';
 import { ProjectDocument, ProjectStatus } from '../../core/models';
+import { TourService } from '../../shared/services/tour.service';
+import { projectTour } from '../../shared/services/client-tours';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { NotificationService } from '../../shared/services/notification.service';
@@ -443,6 +445,12 @@ export class ProjectDetailComponent implements OnInit {
   loaded = signal(false);
 
   private destroyRef = inject(DestroyRef);
+  private tour = inject(TourService);
+
+  constructor() {
+    // La guía recorre las pestañas cambiándolas sola.
+    this.tour.attach(this.destroyRef, 'proyecto', () => this.tour.run(projectTour(t => this.activeTab.set(t))));
+  }
 
   // Al abrir otro proyecto desde una notificación se reutiliza el componente: recargar.
   ngOnInit() {

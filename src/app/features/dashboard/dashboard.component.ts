@@ -1,4 +1,4 @@
-import { Component, inject, computed } from '@angular/core';
+import { Component, DestroyRef, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
@@ -8,6 +8,8 @@ import { TicketService } from '../../core/services/ticket.service';
 import { UserService } from '../../core/services/user.service';
 import { ActivityLogService } from '../../core/services/activity-log.service';
 import { NotificationService } from '../../shared/services/notification.service';
+import { TourService } from '../../shared/services/tour.service';
+import { dashboardTour } from '../../shared/services/client-tours';
 import { loadPageData } from '../../core/http/api-error';
 import { Project, Ticket } from '../../core/models';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
@@ -432,7 +434,10 @@ export class DashboardComponent {
   private activityLog = inject(ActivityLogService);
   private notify = inject(NotificationService);
 
+  private tour = inject(TourService);
+
   constructor() {
+    this.tour.attach(inject(DestroyRef), 'inicio', () => this.tour.run(dashboardTour()));
     const loads: Promise<unknown>[] = [this.projectService.load(), this.ticketService.load(), this.companyService.load()];
     if (this.auth.isOwner()) loads.push(this.activityLog.load(), this.userService.loadStaff());
     loadPageData(this.notify, ...loads);

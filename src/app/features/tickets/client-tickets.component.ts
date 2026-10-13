@@ -38,7 +38,10 @@ function span(ms: number): string {
         <div>
           <h1>Soporte</h1>
           <p>Respuesta garantizada en <strong>{{ slaHours() }} horas</strong>. Aquí ves el avance de cada solicitud y conversas con el equipo de 3TECH.</p>
-          <a routerLink="/aprende" class="learn-link"><app-icon name="lightbulb" [size]="14" /> ¿Primera vez? Aprende a pedir soporte en 3 minutos</a>
+          <div class="learn-row">
+            <a routerLink="/aprende" class="learn-link"><app-icon name="lightbulb" [size]="14" /> ¿Primera vez? Aprende a pedir soporte en 3 minutos</a>
+            <button type="button" class="guide-btn" (click)="guide.emit()"><app-icon name="play" [size]="12" /> Guíame en esta pantalla</button>
+          </div>
         </div>
         <button class="btn-new" (click)="create.emit()"><app-icon name="plus" [size]="16" /> Nueva solicitud</button>
       </header>
@@ -212,7 +215,10 @@ function span(ms: number): string {
     .support-head h1 { margin: 0 0 4px; font-size: 26px; font-weight: 800; color: #0f172a; }
     .support-head p { margin: 0; font-size: 14px; color: #64748b; max-width: 620px; }
     .support-head strong { color: #0f4b92; }
-    .learn-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; font-weight: 700; color: #a8620a; text-decoration: none; }
+    .learn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 8px; }
+    .guide-btn { display: inline-flex; align-items: center; gap: 5px; border: 1.5px solid #c9dbf2; background: #eef4fc; color: #0f4b92; font-size: 12.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+    .guide-btn:hover { background: #dfeafa; }
+    .learn-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: #a8620a; text-decoration: none; }
     .learn-link:hover { text-decoration: underline; }
     .btn-new { display: inline-flex; align-items: center; gap: 7px; border: none; background: #e99d34; color: #fff; padding: 11px 18px; border-radius: 12px; font-weight: 700; font-size: 14px; cursor: pointer; }
     .btn-new:hover { background: #d48a22; }
@@ -327,6 +333,8 @@ export class ClientTicketsComponent {
   /** Ticket recién creado: se selecciona automáticamente. */
   focusId = input<string | null>(null);
   create = output<void>();
+  /** Pide el recorrido guiado sobre esta pantalla. */
+  guide = output<void>();
 
   private auth = inject(AuthService);
   private ticketService = inject(TicketService);

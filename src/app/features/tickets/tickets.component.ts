@@ -12,6 +12,8 @@ import { NotificationService } from '../../shared/services/notification.service'
 import { isControlInvalid } from '../../shared/utils/form.util';
 import { Ticket, TicketPriority, TicketStatus } from '../../core/models';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
+import { TourService } from '../../shared/services/tour.service';
+import { supportTour, SupportTourMode } from '../../shared/services/client-tours';
 import { fileIcon, formatFileSize, MAX_ATTACHMENT_SIZE } from '../../shared/utils/file.util';
 import { ReportService, ReportColumn, ReportTone } from '../../shared/services/report.service';
 import { TicketStatusLabelPipe, PriorityLabelPipe, TICKET_STATUS_LABELS, CATEGORY_LABELS, PRIORITY_LABELS } from '../../shared/pipes/labels.pipe';
@@ -283,7 +285,7 @@ function span(ms: number): string {
         }
       } @else {
         <!-- Vista del cliente: centro de soporte con bandeja y conversación -->
-        <app-client-tickets [focusId]="createdId()" (create)="openModal()" />
+        <app-client-tickets [focusId]="createdId()" (create)="openModal()" (guide)="startTour()" />
       }
     </div>
 
@@ -512,6 +514,7 @@ export class TicketsComponent {
   private router = inject(Router);
   private fb = inject(FormBuilder);
   private notify = inject(NotificationService);
+  private tour = inject(TourService);
 
   readonly buckets: { value: Bucket; label: string }[] = [
     { value: 'attention', label: 'Requieren atención' },
@@ -545,16 +548,25 @@ export class TicketsComponent {
     const timer = setInterval(() => this.now.set(Date.now()), 60_000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
 
-    // Viene del tutorial "Aprende": abre el formulario con la solicitud que practicó.
-    const draft = (history.state as { ticketDraft?: Partial<{ title: string; description: string; category: string; priority: string }> } | null)?.ticketDraft;
-    if (draft && this.auth.isClient()) {
+    // Viene del tutorial "Aprende": abre el formulario con la práctica y/o arranca el recorrido guiado.
+    const state = history.state as { ticketDraft?: Partial<{ title: string; description: string; category: string; priority: string }>; tour?: SupportTourMode } | null;
+    const fromTutorial = !!(state?.ticketDraft || state?.tour);
+    // Guía de Soporte: arranca sola la primera vez (salvo que venga del tutorial, que decide cuál).
+    this.tour.attach(inject(DestroyRef), 'soporte', () => this.startTour('full'), { auto: !fromTutorial });
+    if (this.auth.isClient() && fromTutorial) {
+      const { ticketDraft: draft, tour } = state;
       queueMicrotask(() => {
-        this.openModal();
-        this.form.patchValue(draft);
-        this.notify.success('Tu práctica ya está en el formulario. Revísala, adjunta tu captura y envíala.');
+        if (draft) { this.openModal(); this.form.patchValue(draft); }
+        if (tour) this.startTour(tour);
+        else this.notify.success('Tu práctica ya está en el formulario. Revísala, adjunta tu captura y envíala.');
       });
-      history.replaceState({ ...history.state, ticketDraft: null }, '');
+      history.replaceState({ ...history.state, ticketDraft: null, tour: null }, '');
     }
+  }
+
+  /** Recorrido guiado sobre esta misma pantalla. */
+  startTour(mode: SupportTourMode = 'full') {
+    this.tour.run(supportTour(mode, () => this.openModal()));
   }
 
   fileIcon = fileIcon;
@@ -769,7 +781,7 @@ export class TicketsComponent {
   }
 
   openModal() { this.form.reset({ category: 'bug', priority: 'medium' }); this.selectedAttachment.set(null); this.showModal.set(true); }
-  closeModal() { this.showModal.set(false); }
+  closeModal() { this.showModal.set(false); this.tour.stop(); }
 
   onAttachmentSelected(event: Event) {
     const input = event.target as HTMLInputElement;

@@ -12,6 +12,7 @@ import { CompanyService } from '../../core/services/company.service';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { NotificationService } from '../services/notification.service';
 import { IconComponent } from '../icon/icon.component';
+import { TourService } from '../services/tour.service';
 
 @Component({
   selector: 'app-layout',
@@ -108,6 +109,11 @@ import { IconComponent } from '../icon/icon.component';
             <h2 class="page-title-text">{{ pageTitle() }}</h2>
           </div>
           <div class="top-bar-right">
+            @if (tour.current(); as startGuide) {
+              <button class="help-btn" (click)="startGuide()" aria-label="Ver la guía de esta pantalla" title="Ver la guía de esta pantalla">
+                <app-icon name="help-circle" [size]="17" /> <span>Guía</span>
+              </button>
+            }
             <div class="notif-wrap">
               <button class="notif-btn" (click)="notifOpen.set(!notifOpen())" aria-label="Notificaciones"
                 [attr.aria-expanded]="notifOpen()">
@@ -289,6 +295,9 @@ import { IconComponent } from '../icon/icon.component';
     .top-bar-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 
     .notif-wrap { position: relative; }
+    .help-btn { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid #c9dbf2; background: #eef4fc; color: #0f4b92; font-weight: 700; font-size: 13px; padding: 7px 12px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+    .help-btn:hover { background: #dfeafa; }
+    @media (max-width: 600px) { .help-btn span { display: none; } .help-btn { padding: 7px; } }
     .notif-btn {
       position: relative; background: none; border: none; cursor: pointer; color: #64748b;
       width: 36px; height: 36px; border-radius: 8px;
@@ -387,6 +396,7 @@ import { IconComponent } from '../icon/icon.component';
 })
 export class LayoutComponent {
   auth = inject(AuthService);
+  tour = inject(TourService);
   private ticketService = inject(TicketService);
   private notificationCenter = inject(NotificationCenterService);
   private companyService = inject(CompanyService);

@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
@@ -6,6 +6,10 @@ import { AuthService } from '../../core/services/auth.service';
 import { CompanyService } from '../../core/services/company.service';
 import { TicketService } from '../../core/services/ticket.service';
 import { Ticket, TicketPriority } from '../../core/models';
+import { NotificationService } from '../../shared/services/notification.service';
+import { TourService } from '../../shared/services/tour.service';
+import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
+import confetti from 'canvas-confetti';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
 
 type Category = Ticket['category'];
@@ -66,16 +70,41 @@ const STEPS = [
 @Component({
   selector: 'app-ticket-tutorial',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, IconComponent],
+  imports: [CommonModule, FormsModule, RouterLink, IconComponent, ModalFocusTrapDirective],
   template: `
     <div class="tutorial">
+      <!-- Primera visita: elegir cómo aprender (la guía sobre la pantalla real es la recomendada) -->
+      @if (showWelcome()) {
+        <div class="welcome-overlay">
+          <div class="welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" appModalFocusTrap (closeRequested)="showWelcome.set(false)">
+            <span class="eyebrow"><app-icon name="lightbulb" [size]="14" /> Bienvenido a Soporte 3TECH</span>
+            <h2 id="welcome-title">¿Cómo quieres aprender a pedir soporte?</h2>
+            <div class="w-options">
+              <button class="w-opt rec" (click)="guidedTour()">
+                <span class="w-badge">Recomendado</span>
+                <span class="w-icon"><app-icon name="play" [size]="20" /></span>
+                <strong>Hazlo conmigo en la pantalla real</strong>
+                <span>Te llevo a Soporte y te muestro cada botón y campo. 1 minuto.</span>
+              </button>
+              <button class="w-opt" (click)="showWelcome.set(false)">
+                <span class="w-icon"><app-icon name="edit" [size]="20" /></span>
+                <strong>Practicar aquí paso a paso</strong>
+                <span>Ejercicios con una solicitud de práctica; no se envía nada. 3 minutos.</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      }
       <header class="t-head">
         <div>
           <span class="eyebrow"><app-icon name="lightbulb" [size]="14" /> Aprende en 3 minutos</span>
           <h1>Cómo pedir soporte a 3TECH</h1>
           <p>Practica creando una solicitud paso a paso. No se envía nada hasta que tú lo decidas.</p>
         </div>
-        <a routerLink="/tickets" class="skip">Ya sé cómo, ir a Soporte <app-icon name="chevron-right" [size]="14" /></a>
+        <div class="head-actions">
+          <button class="tour-btn" (click)="guidedTour()"><app-icon name="play" [size]="13" /> Recorrido en la pantalla real</button>
+          <a routerLink="/tickets" class="skip">Ya sé cómo, ir a Soporte <app-icon name="chevron-right" [size]="14" /></a>
+        </div>
       </header>
 
       <!-- Progreso -->
@@ -96,6 +125,8 @@ const STEPS = [
         <section class="lesson" aria-live="polite">
           <span class="step-tag">Paso {{ step() + 1 }} de {{ steps.length }}</span>
 
+          @for (s of [step()]; track s) {
+          <div class="step-body" [class.back]="direction() < 0">
           @switch (step()) {
             @case (0) {
               <h2>¿Cuándo crear una solicitud?</h2>
@@ -212,7 +243,18 @@ const STEPS = [
                 <app-icon name="check" [size]="20" [strokeWidth]="3" />
                 <div><strong>¡Listo, ya sabes cómo pedir soporte!</strong><span>{{ readyCount() }} de 4 elementos de tu práctica están completos.</span></div>
               </div>
+              <div class="decide">
+                <h3>¿Quieres crear esta solicitud ahora?</h3>
+                <p>Si dices que sí, abrimos el formulario real con lo que practicaste para que lo revises, adjuntes tu captura y lo envíes.</p>
+                <div class="decide-btns">
+                  <button class="btn-real" (click)="createReal()"><app-icon name="send" [size]="15" /> Sí, crearla ahora</button>
+                  <button class="btn-no" (click)="startOver()"><app-icon name="x" [size]="15" /> No, volver al inicio</button>
+                </div>
+                <button class="tour-link" (click)="guidedTour()"><app-icon name="play" [size]="12" /> O mejor, hazlo conmigo en la pantalla real</button>
+              </div>
             }
+          }
+          </div>
           }
 
           <div class="nav">
@@ -222,8 +264,6 @@ const STEPS = [
               <button class="btn-next" [disabled]="!canContinue()" (click)="goTo(step() + 1)">
                 {{ canContinue() ? 'Siguiente' : continueHint() }} <app-icon name="chevron-right" [size]="15" />
               </button>
-            } @else {
-              <button class="btn-real" (click)="createReal()"><app-icon name="send" [size]="15" /> Crear esta solicitud de verdad</button>
             }
           </div>
         </section>
@@ -258,6 +298,37 @@ const STEPS = [
     .eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #a8620a; background: #fdf3e6; padding: 4px 10px; border-radius: 999px; }
     .t-head h1 { margin: 8px 0 4px; font-size: 26px; font-weight: 800; color: #0f172a; }
     .t-head p { margin: 0; color: #64748b; font-size: 14px; }
+    .welcome-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, 0.55); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.25s ease both; }
+    .welcome { background: #fff; border-radius: 20px; padding: 26px; width: min(640px, 100%); box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 30px 70px rgba(15, 23, 42, 0.3); animation: stepIn 0.35s ease both; }
+    .welcome .eyebrow { align-self: flex-start; }
+    .welcome h2 { margin: 0; font-size: 22px; font-weight: 800; color: #0f172a; }
+    .w-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+    .w-opt { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; border: 2px solid #e2e8f0; background: #fff; border-radius: 16px; padding: 18px 16px 16px; cursor: pointer; font-family: inherit; transition: border-color 0.15s, transform 0.15s; }
+    .w-opt:hover { border-color: #0f4b92; transform: translateY(-2px); }
+    .w-opt.rec { border-color: #e99d34; background: #fffaf2; }
+    .w-opt strong { font-size: 15.5px; color: #0f172a; }
+    .w-opt > span:last-child { font-size: 13.5px; color: #64748b; line-height: 1.45; }
+    .w-icon { width: 40px; height: 40px; border-radius: 12px; background: #eef4fc; color: #0f4b92; display: flex; align-items: center; justify-content: center; }
+    .w-opt.rec .w-icon { background: #e99d34; color: #fff; }
+    .w-badge { position: absolute; top: -11px; right: 14px; background: #e99d34; color: #fff; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @media (max-width: 600px) { .w-options { grid-template-columns: 1fr; } }
+    .head-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .tour-btn { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid #c9dbf2; background: #eef4fc; color: #0f4b92; font-weight: 700; font-size: 13px; padding: 8px 14px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+    .tour-btn:hover { background: #dfeafa; }
+    .step-body { display: flex; flex-direction: column; gap: 12px; animation: stepIn 0.35s ease both; }
+    .step-body.back { animation-name: stepBack; }
+    @keyframes stepIn { from { opacity: 0; transform: translateX(22px); } to { opacity: 1; transform: none; } }
+    @keyframes stepBack { from { opacity: 0; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
+    @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.08); } 100% { transform: scale(1); } }
+    .decide { border: 2px solid #f6d7a9; background: #fffaf2; border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; animation: stepIn 0.4s 0.15s ease both; }
+    .decide h3 { margin: 0; font-size: 16.5px; font-weight: 800; color: #0f172a; }
+    .decide p { margin: 0; font-size: 14px; color: #475569; line-height: 1.5; }
+    .decide-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn-no { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid #e2e8f0; background: #fff; color: #334155; border-radius: 11px; padding: 10px 16px; font-weight: 700; font-size: 14px; cursor: pointer; font-family: inherit; }
+    .btn-no:hover { background: #f8fafc; }
+    .tour-link { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 0; color: #0f4b92; font-weight: 700; font-size: 13px; cursor: pointer; font-family: inherit; }
+    .tour-link:hover { text-decoration: underline; }
     .skip { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; color: #0f4b92; text-decoration: none; }
 
     .stepper { list-style: none; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 0; padding: 0; }
@@ -321,7 +392,7 @@ const STEPS = [
     .field:focus { border-color: #0f4b92; box-shadow: 0 0 0 3px rgba(15,75,146,0.1); }
     .checks { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
     .checks li { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: #94a3b8; }
-    .checks li.ok { color: #5b6b12; font-weight: 700; }
+    .checks li.ok { color: #5b6b12; font-weight: 700; animation: pop 0.3s ease; }
     .desc-head { display: flex; justify-content: space-between; align-items: center; }
     .link-btn { display: inline-flex; align-items: center; gap: 5px; border: none; background: #eef4fc; color: #0f4b92; font-weight: 700; font-size: 12.5px; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
 
@@ -383,7 +454,8 @@ const STEPS = [
     .pv-foot { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 7px; }
     .pv-score { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
     .pv-score li { display: flex; align-items: center; gap: 7px; font-size: 13px; color: #94a3b8; }
-    .pv-score li.ok { color: #5b6b12; font-weight: 700; }
+    .pv-score li.ok { color: #5b6b12; font-weight: 700; animation: pop 0.3s ease; }
+    @media (prefers-reduced-motion: reduce) { .welcome-overlay, .welcome, .w-opt, .step-body, .decide, .checks li.ok, .pv-score li.ok { animation: none; } }
     .reset { align-self: flex-start; border: none; background: none; color: #94a3b8; font-size: 12.5px; cursor: pointer; text-decoration: underline; padding: 0; }
 
     @media (max-width: 1100px) { .stage { grid-template-columns: 1fr; } .preview { position: static; } }
@@ -403,6 +475,8 @@ export class TicketTutorialComponent {
   private companyService = inject(CompanyService);
   private ticketService = inject(TicketService);
   private router = inject(Router);
+  private notify = inject(NotificationService);
+  private tour = inject(TourService);
 
   readonly steps = STEPS;
   readonly categories = CATEGORIES;
@@ -410,6 +484,9 @@ export class TicketTutorialComponent {
   readonly priorities = PRIORITIES;
 
   step = signal(0);
+  showWelcome = signal(false);
+  /** 1 = avanzó, -1 = retrocedió (para animar en la dirección correcta). */
+  direction = signal(1);
   maxReached = signal(0);
   quizAnswers = signal<(Category | null)[]>(QUIZ.map(() => null));
   foundButton = signal(false);
@@ -424,6 +501,10 @@ export class TicketTutorialComponent {
   constructor() {
     this.companyService.load().catch(() => undefined);
     this.restore();
+    // Cliente nuevo que aún no hizo la guía y no ha empezado la práctica: se le ofrece primero.
+    this.showWelcome.set(this.auth.isClient() && !this.tour.hasSeen('soporte') && this.maxReached() === 0);
+    // El botón "Guía" del encabezado vuelve a mostrar la bienvenida con las dos formas de aprender.
+    this.tour.attach(inject(DestroyRef), 'aprende', () => this.showWelcome.set(true), { auto: false });
     effect(() => { this.maxReached.update(m => Math.max(m, this.step())); });
   }
 
@@ -493,16 +574,36 @@ export class TicketTutorialComponent {
 
   goTo(i: number) {
     if (i < 0 || i >= STEPS.length || i > this.maxReached() + (this.canContinue() ? 1 : 0)) return;
+    this.direction.set(i >= this.step() ? 1 : -1);
+    const finishing = i === STEPS.length - 1 && this.step() !== i;
     this.step.set(i);
     this.save();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (finishing) this.celebrate();
   }
 
-  /** Abre el formulario real de Soporte con la práctica ya escrita. */
+  private celebrate() {
+    confetti({ particleCount: 140, spread: 85, origin: { y: 0.6 }, colors: ['#0f4b92', '#e99d34', '#a9c238'], disableForReducedMotion: true });
+  }
+
+  /** "Sí": abre el formulario real con la práctica y un recorrido por sus campos. El tutorial queda listo para empezar de nuevo. */
   createReal() {
-    this.router.navigate(['/tickets'], {
-      state: { ticketDraft: { title: this.title.trim(), description: this.description.trim(), category: this.category(), priority: this.priority() } },
-    });
+    const ticketDraft = { title: this.title.trim(), description: this.description.trim(), category: this.category(), priority: this.priority() };
+    this.reset();
+    this.router.navigate(['/tickets'], { state: { ticketDraft, tour: 'form' } });
+  }
+
+  /** "No": vuelve al primer paso con la práctica en blanco. */
+  startOver() {
+    this.direction.set(-1);
+    this.reset();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    this.notify.info('Listo, el tutorial empieza de nuevo cuando quieras.');
+  }
+
+  /** Recorrido guiado sobre la pantalla real de Soporte. */
+  guidedTour() {
+    this.router.navigate(['/tickets'], { state: { tour: 'full' } });
   }
 
   reset() {

@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed } from '@angular/core';
+import { Component, DestroyRef, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -6,6 +6,8 @@ import { AuthService } from '../../core/services/auth.service';
 import { ProjectService, ProjectInput } from '../../core/services/project.service';
 import { CompanyService } from '../../core/services/company.service';
 import { Project, ProjectPriority, ProjectStatus } from '../../core/models';
+import { TourService } from '../../shared/services/tour.service';
+import { projectsTour } from '../../shared/services/client-tours';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
@@ -326,8 +328,11 @@ export class ProjectsComponent {
 
   allCompanies = this.companyService.companies;
 
+  private tour = inject(TourService);
+
   constructor() {
     loadPageData(this.notify, this.projectService.load(), ...(this.auth.isStaff() ? [this.companyService.load()] : []));
+    this.tour.attach(inject(DestroyRef), 'proyectos', () => this.tour.run(projectsTour()));
   }
 
   form = this.fb.group({
