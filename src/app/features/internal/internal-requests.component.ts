@@ -56,7 +56,7 @@ function duration(ms: number): string {
         <aside class="list-pane">
           <div class="boxes" role="tablist" aria-label="Bandejas">
             @for (b of boxes(); track b.id) {
-              <button role="tab" [class.active]="box() === b.id" [attr.aria-selected]="box() === b.id" (click)="box.set(b.id)">
+              <button role="tab" [class.active]="box() === b.id" [attr.aria-selected]="box() === b.id" (click)="box.set(b.id); boxChosen = true">
                 {{ b.label }} @if (b.count) { <span class="count" [class.hot]="b.hot">{{ b.count }}</span> }
               </button>
             }
@@ -415,7 +415,9 @@ export class InternalRequestsComponent {
   myDepartment = computed(() => this.departments.getById(this.myDepartmentId()));
   activeDepartments = computed(() => this.departments.departments().filter(d => d.active));
 
-  box = signal<Box>(this.auth.currentUser()?.departmentId ? 'received' : 'all');
+  box = signal<Box>(this.auth.currentUser()?.departmentId ? 'mine' : 'all');
+  /** Si la persona ya eligió una bandeja, no se la cambiamos al terminar de cargar. */
+  boxChosen = false;
   statusFilter = signal<StatusFilter>('open');
   search = signal('');
   selectedId = signal<string | null>(null);
@@ -429,7 +431,13 @@ export class InternalRequestsComponent {
   private now = signal(Date.now());
 
   constructor() {
-    loadPageData(this.notify, this.service.load(), this.departments.load());
+    loadPageData(this.notify, this.service.load(), this.departments.load()).then(() => {
+      // Abre en "Mías" si tiene algo asignado; si no, en lo que llegó a su departamento.
+      if (!this.boxChosen && this.myDepartmentId()) {
+        const mine = this.service.items().some(r => r.assignedTo?.id === this.meId() && isOpen(r));
+        this.box.set(mine ? 'mine' : 'received');
+      }
+    });
     // Al abrir desde una notificación se reutiliza el componente: seguir el parámetro.
     this.route.paramMap.pipe(takeUntilDestroyed()).subscribe(p => {
       const id = p.get('id');
@@ -453,10 +461,11 @@ export class InternalRequestsComponent {
     const items = this.service.items();
     const open = (b: Box) => items.filter(r => this.inBox(r, b) && isOpen(r)).length;
     const list: { id: Box; label: string; count: number; hot?: boolean }[] = [];
+    // Orden de trabajo: primero lo que tengo yo, luego lo que llegó a mi departamento, al final lo que envié.
     if (this.myDepartmentId()) {
+      list.push({ id: 'mine', label: 'Mías', count: open('mine'), hot: open('mine') > 0 });
       list.push({ id: 'received', label: 'Recibidas', count: open('received'), hot: this.service.pendingForMe() > 0 });
       list.push({ id: 'sent', label: 'Enviadas', count: open('sent') });
-      list.push({ id: 'mine', label: 'Mías', count: open('mine') });
     }
     if (this.auth.isOwner()) list.push({ id: 'all', label: 'Todas', count: open('all') });
     return list;
@@ -469,9 +478,15 @@ export class InternalRequestsComponent {
       .filter(r => this.inBox(r, this.box()))
       .filter(r => f === 'all' || (f === 'open' ? isOpen(r) : !isOpen(r)))
       .filter(r => !s || r.title.toLowerCase().includes(s) || String(r.number) === s || r.description.toLowerCase().includes(s))
-      // Las vencidas primero; luego lo más reciente.
-      .sort((a, b) => Number(b.slaBreached) - Number(a.slaBreached) || b.updatedAt.localeCompare(a.updatedAt));
+      // Primero las que atiendo yo, luego las demás abiertas (vencidas antes) y al final las resueltas.
+      .sort((a, b) => this.rank(a) - this.rank(b) || Number(b.slaBreached) - Number(a.slaBreached) || b.updatedAt.localeCompare(a.updatedAt));
   });
+
+  private rank(r: InternalRequest): number {
+    if (!isOpen(r)) return 3;
+    if (r.assignedTo?.id === this.meId()) return 0;
+    return r.toDepartment.id === this.myDepartmentId() ? 1 : 2;
+  }
 
   selected = computed(() => this.service.getById(this.selectedId()));
 

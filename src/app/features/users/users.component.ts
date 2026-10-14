@@ -113,9 +113,11 @@ function generatePassword(): string {
                 <span>Responde solicitudes internas en máximo <b>{{ d.slaHours }} h</b> · {{ people().length }} {{ people().length === 1 ? 'persona' : 'personas' }} · {{ d.openReceived }} abiertas</span>
               </div>
               <div class="dep-actions">
-                <button class="btn-ghost sm" (click)="openDepartmentModal(d)"><app-icon name="edit" [size]="13" /> Editar</button>
-                <button class="btn-ghost sm" (click)="toggleDepartment(d)">{{ d.active ? 'Desactivar' : 'Activar' }}</button>
-                <button class="btn-ghost sm danger" (click)="deleteDepartment(d)" aria-label="Eliminar departamento"><app-icon name="trash" [size]="13" /></button>
+                <button class="dep-btn" (click)="openDepartmentModal(d)"><app-icon name="edit" [size]="13" /> Editar</button>
+                <button class="dep-btn" [class.warn]="d.active" [class.good]="!d.active" (click)="toggleDepartment(d)">
+                  <app-icon [name]="d.active ? 'lock' : 'check'" [size]="13" /> {{ d.active ? 'Desactivar' : 'Activar' }}
+                </button>
+                <button class="dep-btn danger icon" (click)="deleteDepartment(d)" aria-label="Eliminar departamento" title="Eliminar departamento"><app-icon name="trash" [size]="14" /></button>
               </div>
             } @else {
               <span class="g-icon lg" [class.team]="group() === 'team'"><app-icon [name]="group() === 'team' ? 'settings' : 'users'" [size]="20" /></span>
@@ -449,8 +451,16 @@ function generatePassword(): string {
     .mini-add { width: 22px; height: 22px; border-radius: 7px; border: none; background: #eef4fc; color: #0f4b92; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
     .mini-add:hover { background: #dfeafa; }
     .dep-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    .btn-ghost.sm { padding: 6px 10px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; }
-    .btn-ghost.danger { color: #dc2626; }
+    .btn-ghost { border: 1.5px solid #e2e8f0; background: #fff; color: #334155; font-weight: 700; font-size: 13px; padding: 0 14px; border-radius: 10px; cursor: pointer; font-family: inherit; }
+    .btn-ghost:hover { background: #f8fafc; border-color: #cbd5e1; }
+    .dep-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; border: none; background: #f1f5f9; color: #334155; font-weight: 700; font-size: 12.5px; padding: 0 12px; border-radius: 10px; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+    .dep-btn:hover { background: #e2e8f0; }
+    .dep-btn.warn { background: #fdf3e6; color: #a8620a; }
+    .dep-btn.warn:hover { background: #fbe7cc; }
+    .dep-btn.good { background: #f2f7e1; color: #5b6b12; }
+    .dep-btn.danger { background: #fef2f2; color: #dc2626; }
+    .dep-btn.danger:hover { background: #fee2e2; }
+    .dep-btn.icon { width: 34px; padding: 0; justify-content: center; }
     .inactive-tag { font-size: 11px; font-weight: 700; color: #94a3b8; margin-left: 8px; }
     .dep-sla-group { margin-top: 14px; }
     .company-name { font-weight: 600; }
