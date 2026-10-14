@@ -8,8 +8,10 @@ export interface StaffMember {
 export interface User {
   id: string;
   username: string;
-  role: 'owner' | 'technician' | 'client';
+  role: 'owner' | 'technician' | 'client' | 'collaborator';
   companyId?: string;
+  /** Departamento interno (colaboradores y equipo). */
+  departmentId?: string;
   name: string;
   email: string;
   /** Último inicio de sesión (solo en la gestión de usuarios). */
@@ -165,7 +167,7 @@ export interface TicketResponse {
 }
 
 export type ActivityKind = 'create' | 'update' | 'delete' | 'status' | 'assign' | 'comment' | 'access' | 'security';
-export type ActivityEntity = 'company' | 'user' | 'project' | 'ticket' | 'invoice';
+export type ActivityEntity = 'company' | 'user' | 'project' | 'ticket' | 'invoice' | 'internal_request' | 'department';
 
 export interface ActivityLogEntry {
   id: string;
@@ -222,4 +224,63 @@ export interface Ticket {
   resolvedByName?: string;
   /** Última respuesta (viene en la lista): indica de quién es el turno. */
   lastResponse?: { authorName: string; authorRole: 'owner' | 'client'; createdAt: string; content?: string };
+}
+
+// ───────────── Solicitudes internas entre departamentos ─────────────
+
+export interface DepartmentMember { id: string; name: string; role: User['role'] }
+
+export interface Department {
+  id: string;
+  name: string;
+  /** Horas de primera respuesta que el departamento se compromete a dar. */
+  slaHours: number;
+  active: boolean;
+  members: DepartmentMember[];
+  /** Solicitudes recibidas que siguen abiertas. */
+  openReceived: number;
+}
+
+export type InternalCategory = 'request' | 'incident' | 'question' | 'other';
+
+export interface InternalAttachment { id: string; name: string; type: string; size: number; url: string }
+
+export interface InternalResponse {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorRole: User['role'];
+  authorDepartmentId?: string;
+  content: string;
+  createdAt: string;
+  attachments: InternalAttachment[];
+}
+
+export interface InternalRequest {
+  id: string;
+  /** Número corto: SI-{number}. */
+  number: number;
+  title: string;
+  description: string;
+  category: InternalCategory;
+  status: TicketStatus;
+  priority: TicketPriority;
+  fromDepartment: { id: string; name: string; slaHours: number };
+  toDepartment: { id: string; name: string; slaHours: number };
+  createdById?: string;
+  createdByName: string;
+  assignedTo?: { id: string; name: string; role: User['role'] };
+  slaDeadline: string;
+  firstResponseAt?: string;
+  resolvedAt?: string;
+  resolvedByName?: string;
+  slaBreached: boolean;
+  slaMet: boolean | null;
+  createdAt: string;
+  updatedAt: string;
+  responseCount: number;
+  lastResponse?: { authorName: string; authorDepartmentId?: string; createdAt: string; content: string };
+  /** Solo en el detalle. */
+  responses?: InternalResponse[];
+  attachments?: InternalAttachment[];
 }

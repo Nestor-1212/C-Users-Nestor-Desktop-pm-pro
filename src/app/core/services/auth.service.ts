@@ -25,6 +25,10 @@ export class AuthService {
   isTechnician = computed(() => this.currentUser()?.role === 'technician');
   /** Equipo de 3TECH (administrador o técnico): trabaja tickets y proyectos. */
   isStaff = computed(() => this.isOwner() || this.isTechnician());
+  /** Empleado interno: solo usa las solicitudes internas. */
+  isCollaborator = computed(() => this.currentUser()?.role === 'collaborator');
+  /** Usa las solicitudes internas: el Propietario y quien pertenece a un departamento. */
+  canUseInternal = computed(() => this.isOwner() || (!this.isClient() && !!this.currentUser()?.departmentId));
 
   constructor() {
     LEGACY_KEYS.forEach(k => { this.storage.remove(k); this.storage.removeSession(k); });

@@ -17,6 +17,8 @@ const ENTITY: Record<string, { label: string; icon: IconName }> = {
   company: { label: 'Empresa', icon: 'building' },
   user: { label: 'Usuario', icon: 'user' },
   invoice: { label: 'Factura', icon: 'file-text' },
+  internal_request: { label: 'Solicitud interna', icon: 'share' },
+  department: { label: 'Departamento', icon: 'users' },
 };
 
 const KIND_LABEL: Record<ActivityKind, string> = {
@@ -24,7 +26,7 @@ const KIND_LABEL: Record<ActivityKind, string> = {
   assign: 'Asignación', comment: 'Comentario', access: 'Acceso', security: 'Seguridad',
 };
 
-const ROLE_LABEL: Record<string, string> = { owner: 'Administrador', technician: 'Técnico', client: 'Cliente' };
+const ROLE_LABEL: Record<string, string> = { owner: 'Administrador', technician: 'Técnico', client: 'Cliente', collaborator: 'Colaborador' };
 const initials = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -285,6 +287,7 @@ export class ActivityComponent {
     { value: 'project', label: 'Proyectos', icon: 'folder' },
     { value: 'company', label: 'Empresas', icon: 'building' },
     { value: 'user', label: 'Usuarios y accesos', icon: 'user' },
+    { value: 'internal_request', label: 'Solicitudes internas', icon: 'share' },
   ];
   readonly kinds = Object.keys(KIND_LABEL) as ActivityKind[];
 
@@ -449,6 +452,7 @@ export class ActivityComponent {
     if (e.entityType === 'ticket') return ['/tickets', e.entityId];
     if (e.entityType === 'project') return ['/projects', e.entityId];
     if (e.entityType === 'company') return ['/companies'];
+    if (e.entityType === 'internal_request') return ['/internas', e.entityId];
     return null;
   }
 

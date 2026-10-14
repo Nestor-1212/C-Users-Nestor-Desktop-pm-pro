@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard, notTechnicianGuard, ownerGuard } from './core/guards/auth.guard';
+import { authGuard, collaboratorScopeGuard, internalGuard, notTechnicianGuard, ownerGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
   { path: '', redirectTo: '/dashboard', pathMatch: 'full' },
@@ -11,6 +11,7 @@ export const routes: Routes = [
     path: '',
     loadComponent: () => import('./shared/layout/layout.component').then(m => m.LayoutComponent),
     canActivate: [authGuard],
+    canActivateChild: [collaboratorScopeGuard],
     children: [
       {
         path: 'dashboard',
@@ -61,6 +62,18 @@ export const routes: Routes = [
         path: 'aprende',
         data: { title: 'Aprende a pedir soporte' },
         loadComponent: () => import('./features/help/ticket-tutorial.component').then(m => m.TicketTutorialComponent)
+      },
+      {
+        path: 'internas',
+        data: { title: 'Solicitudes internas' },
+        loadComponent: () => import('./features/internal/internal-requests.component').then(m => m.InternalRequestsComponent),
+        canActivate: [internalGuard]
+      },
+      {
+        path: 'internas/:id',
+        data: { title: 'Solicitudes internas' },
+        loadComponent: () => import('./features/internal/internal-requests.component').then(m => m.InternalRequestsComponent),
+        canActivate: [internalGuard]
       },
       {
         path: 'tickets/:id',

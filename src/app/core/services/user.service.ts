@@ -11,7 +11,9 @@ export interface UserInput {
   email: string;
   /** Solo para clientes; un técnico no pertenece a ninguna empresa. */
   companyId: string | null;
-  role?: 'client' | 'technician';
+  /** Departamento interno: obligatorio para colaboradores, opcional para técnicos. */
+  departmentId?: string | null;
+  role?: 'client' | 'technician' | 'collaborator';
 }
 
 /** Cuentas de clientes y técnicos (solo el owner las administra) y el equipo asignable. */

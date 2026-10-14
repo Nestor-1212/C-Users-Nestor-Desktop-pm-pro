@@ -4,7 +4,9 @@ import { ReactiveFormsModule, FormBuilder, Validators, AbstractControl, Validati
 import { UserService } from '../../core/services/user.service';
 import { CompanyService } from '../../core/services/company.service';
 import { TicketService } from '../../core/services/ticket.service';
-import { Ticket, User } from '../../core/models';
+import { DepartmentService } from '../../core/services/department.service';
+import { InternalRequestService } from '../../core/services/internal-request.service';
+import { Department, Ticket, User } from '../../core/models';
 import { IconComponent } from '../../shared/icon/icon.component';
 import { ModalFocusTrapDirective } from '../../shared/directives/modal-focus-trap.directive';
 import { ConfirmService } from '../../shared/services/confirm.service';
@@ -13,6 +15,8 @@ import { isControlInvalid } from '../../shared/utils/form.util';
 import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 
 interface Credentials { title: string; name: string; username: string; password: string }
+type Role = 'client' | 'technician' | 'collaborator';
+const ROLE_ORDER: Record<string, number> = { technician: 0, collaborator: 1, client: 2 };
 
 const isClosed = (t: Ticket) => t.status === 'resolved' || t.status === 'closed';
 /** "hace 5 min", "hace 3 h", "hace 2 d", "hace 4 sem". */
@@ -44,13 +48,13 @@ function generatePassword(): string {
       <div class="page-header">
         <div>
           <h1>Usuarios</h1>
-          <p>Quién puede entrar al sistema, agrupado por empresa y por tu equipo técnico</p>
+          <p>Quién puede entrar al sistema: clientes por empresa, tu equipo técnico y el personal interno por departamento</p>
         </div>
       </div>
 
       <!-- Resumen -->
       <div class="summary">
-        <div class="sum"><strong>{{ clientUsers().length + technicians().length }}</strong><span>Personas con acceso</span></div>
+        <div class="sum"><strong>{{ clientUsers().length + technicians().length + collaborators().length }}</strong><span>Personas con acceso</span></div>
         <div class="sum"><strong>{{ companiesWithAccess() }} <small>de {{ activeCompanies() }}</small></strong><span>Empresas con acceso</span></div>
         <div class="sum"><strong>{{ technicians().length }}</strong><span>Técnicos 3TECH</span></div>
         <button class="sum clickable" [class.alert]="neverLogged().length > 0" (click)="group.set('all'); onlyNever.set(!onlyNever())">
@@ -66,6 +70,16 @@ function generatePassword(): string {
               <span class="g-icon" [class.team]="g.id === 'team'"><app-icon [name]="g.icon" [size]="16" /></span>
               <span class="g-name">{{ g.label }}</span>
               <span class="g-count">{{ g.count }}</span>
+            </button>
+          }
+          <span class="groups-title groups-title-row">Departamentos
+            <button class="mini-add" (click)="openDepartmentModal()" aria-label="Nuevo departamento" title="Nuevo departamento"><app-icon name="plus" [size]="13" /></button>
+          </span>
+          @for (d of departmentGroups(); track d.id) {
+            <button class="group-item" [class.active]="group() === 'dep:' + d.id" [class.inactive]="!d.active" (click)="selectGroup('dep:' + d.id)">
+              <span class="g-icon dep"><app-icon name="share" [size]="14" /></span>
+              <span class="g-name">{{ d.name }}@if (!d.active) { <small>Inactivo</small> }</span>
+              <span class="g-count">{{ d.count }}</span>
             </button>
           }
           <span class="groups-title">Empresas</span>
@@ -92,11 +106,24 @@ function generatePassword(): string {
                 <h2>{{ c.name }}</h2>
                 <span>{{ c.status === 'active' ? 'Empresa activa' : 'Empresa inactiva' }} · {{ people().length }} {{ people().length === 1 ? 'persona' : 'personas' }} con acceso</span>
               </div>
+            } @else if (selectedDepartment(); as d) {
+              <span class="g-icon lg dep"><app-icon name="share" [size]="20" /></span>
+              <div class="pane-title">
+                <h2>{{ d.name }}@if (!d.active) { <small class="inactive-tag">Inactivo</small> }</h2>
+                <span>Responde solicitudes internas en máximo <b>{{ d.slaHours }} h</b> · {{ people().length }} {{ people().length === 1 ? 'persona' : 'personas' }} · {{ d.openReceived }} abiertas</span>
+              </div>
+              <div class="dep-actions">
+                <button class="btn-ghost sm" (click)="openDepartmentModal(d)"><app-icon name="edit" [size]="13" /> Editar</button>
+                <button class="btn-ghost sm" (click)="toggleDepartment(d)">{{ d.active ? 'Desactivar' : 'Activar' }}</button>
+                <button class="btn-ghost sm danger" (click)="deleteDepartment(d)" aria-label="Eliminar departamento"><app-icon name="trash" [size]="13" /></button>
+              </div>
             } @else {
               <span class="g-icon lg" [class.team]="group() === 'team'"><app-icon [name]="group() === 'team' ? 'settings' : 'users'" [size]="20" /></span>
               <div class="pane-title">
-                <h2>{{ group() === 'team' ? 'Equipo 3TECH' : 'Todas las personas' }}</h2>
-                <span>{{ group() === 'team' ? 'Atienden tickets y proyectos. No ven empresas, usuarios, bitácora ni analíticas.' : 'Clientes y técnicos con acceso al sistema' }}</span>
+                <h2>{{ group() === 'team' ? 'Equipo 3TECH' : group() === 'internal' ? 'Colaboradores internos' : 'Todas las personas' }}</h2>
+                <span>{{ group() === 'team' ? 'Atienden tickets y proyectos. No ven empresas, usuarios, bitácora ni analíticas.'
+                  : group() === 'internal' ? 'Personal de los departamentos. Solo usan las solicitudes internas: no ven clientes ni proyectos.'
+                  : 'Clientes, técnicos y personal interno con acceso al sistema' }}</span>
               </div>
             }
             <div class="search-wrap pane-search">
@@ -105,7 +132,7 @@ function generatePassword(): string {
               <input id="user-search" type="text" class="search-input" placeholder="Buscar persona…"
                 [value]="search()" (input)="search.set($any($event.target).value)">
             </div>
-            <button class="btn-add" (click)="addPerson()"><app-icon name="plus" [size]="14" /> {{ group() === 'team' ? 'Agregar técnico' : 'Agregar persona' }}</button>
+            <button class="btn-add" (click)="addPerson()"><app-icon name="plus" [size]="14" /> {{ group() === 'team' ? 'Agregar técnico' : group() === 'internal' || selectedDepartment() ? 'Agregar colaborador' : 'Agregar persona' }}</button>
           </header>
 
           @if (people().length) {
@@ -121,7 +148,7 @@ function generatePassword(): string {
               @for (u of people(); track u.id) {
                 <div class="t-row" role="row">
                   <span class="cell person" role="cell">
-                    <span class="av" [class.tech]="u.role === 'technician'" [style.background]="u.role === 'technician' ? null : avatarColor(u.id)">{{ initialsOf(u.name) }}</span>
+                    <span class="av" [class.tech]="u.role === 'technician'" [class.collab]="u.role === 'collaborator'" [style.background]="u.role === 'client' ? avatarColor(u.id) : null">{{ initialsOf(u.name) }}</span>
                     <span class="person-main">
                       <strong>{{ u.name }}</strong>
                       <a [href]="'mailto:' + u.email">{{ u.email }}</a>
@@ -129,13 +156,16 @@ function generatePassword(): string {
                   </span>
                   <span class="cell mono" role="cell">&#64;{{ u.username }}</span>
                   <span class="cell" role="cell">
-                    @if (u.role === 'technician') { <span class="role-chip tech">Técnico 3TECH</span> }
+                    @if (u.role === 'technician') { <span class="role-chip tech">Técnico 3TECH</span>@if (u.departmentName && !selectedDepartment()) { <small class="dep-note">{{ u.departmentName }}</small> } }
+                    @else if (u.role === 'collaborator') { <span class="role-chip collab">{{ selectedDepartment() ? 'Colaborador' : 'Colaborador · ' + u.departmentName }}</span> }
                     @else if (selectedCompany()) { <span class="role-chip client">Cliente</span> }
                     @else { <span class="company-name">{{ u.companyName }}</span> }
                   </span>
                   <span class="cell activity" role="cell">
                     @if (u.role === 'technician') {
                       <span [class.warn]="u.breached > 0">{{ u.open }} abiertos</span> · {{ u.resolved }} resueltos
+                    } @else if (u.role === 'collaborator') {
+                      {{ u.internalOpen }} por atender · {{ u.internalCreated }} {{ u.internalCreated === 1 ? 'solicitud enviada' : 'solicitudes enviadas' }}
                     } @else {
                       {{ u.ticketsCreated }} {{ u.ticketsCreated === 1 ? 'ticket creado' : 'tickets creados' }}
                     }
@@ -184,7 +214,7 @@ function generatePassword(): string {
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title"
           appModalFocusTrap (closeRequested)="closeModal()" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h2 id="user-modal-title">{{ editingId() ? 'Editar usuario' : (form.getRawValue().role === 'technician' ? 'Nuevo técnico' : 'Nuevo usuario de cliente') }}</h2>
+            <h2 id="user-modal-title">{{ editingId() ? 'Editar usuario' : (form.getRawValue().role === 'technician' ? 'Nuevo técnico' : form.getRawValue().role === 'collaborator' ? 'Nuevo colaborador interno' : 'Nuevo usuario de cliente') }}</h2>
             <button class="modal-close" (click)="closeModal()" aria-label="Cerrar"><app-icon name="x" [size]="18" /></button>
           </div>
           <form [formGroup]="form" (ngSubmit)="saveUser()" class="modal-body" novalidate>
@@ -195,6 +225,9 @@ function generatePassword(): string {
                 </button>
                 <button type="button" role="radio" [attr.aria-checked]="form.getRawValue().role === 'technician'" [class.active]="form.getRawValue().role === 'technician'" (click)="setRole('technician')">
                   <app-icon name="settings" [size]="16" /><span><strong>Técnico 3TECH</strong><small>Atiende tickets y proyectos</small></span>
+                </button>
+                <button type="button" role="radio" [attr.aria-checked]="form.getRawValue().role === 'collaborator'" [class.active]="form.getRawValue().role === 'collaborator'" (click)="setRole('collaborator')">
+                  <app-icon name="share" [size]="16" /><span><strong>Colaborador interno</strong><small>Solo solicitudes entre departamentos</small></span>
                 </button>
               </div>
             }
@@ -208,6 +241,17 @@ function generatePassword(): string {
                     @for (c of companies(); track c.id) { <option [value]="c.id">{{ c.name }}</option> }
                   </select>
                   @if (invalid('companyId')) { <span class="field-error">Selecciona la empresa a la que pertenece.</span> }
+                </div>
+              }
+              @if (form.getRawValue().role !== 'client') {
+                <div class="form-group full">
+                  <label for="user-department">Departamento {{ form.getRawValue().role === 'collaborator' ? '*' : '(opcional)' }}</label>
+                  <select id="user-department" formControlName="departmentId" [class.error]="invalid('departmentId')">
+                    <option value="">{{ form.getRawValue().role === 'collaborator' ? 'Selecciona el departamento' : 'Sin departamento' }}</option>
+                    @for (d of activeDepartments(); track d.id) { <option [value]="d.id">{{ d.name }}</option> }
+                  </select>
+                  @if (invalid('departmentId')) { <span class="field-error">Un colaborador necesita un departamento.</span> }
+                  @else if (form.getRawValue().role === 'technician') { <span class="hint">Con departamento, también atiende y envía solicitudes internas.</span> }
                 </div>
               }
               <div class="form-group full">
@@ -248,6 +292,34 @@ function generatePassword(): string {
             <div class="modal-footer">
               <button type="button" class="btn-secondary" (click)="closeModal()">Cancelar</button>
               <button type="submit" class="btn-primary" [disabled]="form.invalid || saving()">{{ editingId() ? 'Guardar cambios' : 'Crear acceso' }}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    }
+
+    <!-- Departamento -->
+    @if (departmentModal()) {
+      <div class="modal-overlay" (click)="departmentModal.set(false)">
+        <div class="modal small" role="dialog" aria-modal="true" aria-labelledby="dep-modal-title"
+          appModalFocusTrap (closeRequested)="departmentModal.set(false)" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h2 id="dep-modal-title">{{ editingDepartment() ? 'Editar departamento' : 'Nuevo departamento' }}</h2>
+            <button class="modal-close" (click)="departmentModal.set(false)" aria-label="Cerrar"><app-icon name="x" [size]="18" /></button>
+          </div>
+          <form [formGroup]="departmentForm" (ngSubmit)="saveDepartment()" class="modal-body" novalidate>
+            <div class="form-group full">
+              <label for="dep-name">Nombre *</label>
+              <input id="dep-name" type="text" formControlName="name" placeholder="Ej: Call Center" maxlength="60">
+            </div>
+            <div class="form-group full dep-sla-group">
+              <label for="dep-sla">Responde en máximo (horas) *</label>
+              <input id="dep-sla" type="number" formControlName="slaHours" min="1" max="720">
+              <span class="hint">Es el compromiso de primera respuesta para las solicitudes que recibe este departamento.</span>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn-secondary" (click)="departmentModal.set(false)">Cancelar</button>
+              <button type="submit" class="btn-primary" [disabled]="departmentForm.invalid || saving()">{{ editingDepartment() ? 'Guardar' : 'Crear departamento' }}</button>
             </div>
           </form>
         </div>
@@ -369,6 +441,18 @@ function generatePassword(): string {
     .role-chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
     .role-chip.tech { background: #fdf3e6; color: #a8620a; }
     .role-chip.client { background: #eef4fc; color: #0f4b92; }
+    .role-chip.collab { background: #ecfeff; color: #0e7490; }
+    .dep-note { display: block; font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .av.collab { background: #0891b2; }
+    .g-icon.dep { background: #ecfeff; color: #0e7490; }
+    .groups-title-row { display: flex; align-items: center; justify-content: space-between; }
+    .mini-add { width: 22px; height: 22px; border-radius: 7px; border: none; background: #eef4fc; color: #0f4b92; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+    .mini-add:hover { background: #dfeafa; }
+    .dep-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn-ghost.sm { padding: 6px 10px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-ghost.danger { color: #dc2626; }
+    .inactive-tag { font-size: 11px; font-weight: 700; color: #94a3b8; margin-left: 8px; }
+    .dep-sla-group { margin-top: 14px; }
     .company-name { font-weight: 600; }
     .activity .warn { color: #dc2626; font-weight: 700; }
     .login { font-size: 12.5px; color: #475569; }
@@ -414,7 +498,7 @@ function generatePassword(): string {
 
     /* Formularios */
     .modal.small { max-width: 440px; }
-    .role-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+    .role-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
     .role-picker button { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 12px; border: 1.5px solid #e2e8f0; border-radius: 12px; background: #fff; cursor: pointer; font-family: inherit; color: #475569; }
     .role-picker span { display: flex; flex-direction: column; }
     .role-picker strong { font-size: 13.5px; color: #0f172a; }
@@ -458,6 +542,8 @@ export class UsersComponent {
   private userService = inject(UserService);
   private companyService = inject(CompanyService);
   private ticketService = inject(TicketService);
+  private departmentService = inject(DepartmentService);
+  private internalRequests = inject(InternalRequestService);
   private fb = inject(FormBuilder);
   private confirm = inject(ConfirmService);
   private notify = inject(NotificationService);
@@ -466,7 +552,7 @@ export class UsersComponent {
   initialsOf = initials;
   readonly loginUrl = `${window.location.origin}/login`;
 
-  /** 'all' = todas las personas, 'team' = técnicos, o el id de una empresa. */
+  /** 'all' = todas, 'team' = técnicos, 'internal' = colaboradores, 'dep:<id>' = un departamento, o el id de una empresa. */
   group = signal<string>('all');
   onlyNever = signal(false);
   menuFor = signal<string | null>(null);
@@ -483,14 +569,26 @@ export class UsersComponent {
   companies = this.companyService.companies;
 
   constructor() {
-    loadPageData(this.notify, this.userService.load(), this.companyService.load(), this.ticketService.load());
+    loadPageData(this.notify, this.userService.load(), this.companyService.load(), this.ticketService.load(),
+      this.departmentService.load(), this.internalRequests.load());
   }
+
+  departments = this.departmentService.departments;
+  activeDepartments = computed(() => this.departments().filter(d => d.active));
+  departmentModal = signal(false);
+  editingDepartment = signal<Department | null>(null);
+  departmentForm = this.fb.group({
+    name: ['', [Validators.required, Validators.minLength(2)]],
+    slaHours: [8, [Validators.required, Validators.min(1), Validators.max(720)]],
+  });
 
   clientUsers = computed(() => this.userService.users().filter(u => u.role === 'client'));
   technicians = computed(() => this.userService.users().filter(u => u.role === 'technician'));
+  collaborators = computed(() => this.userService.users().filter(u => u.role === 'collaborator'));
 
   form = this.fb.group({
-    role: ['client' as 'client' | 'technician'],
+    role: ['client' as Role],
+    departmentId: [''],
     name: ['', Validators.required],
     username: ['', [Validators.required, this.usernameTakenValidator()]],
     email: ['', [Validators.required, Validators.email]],
@@ -513,12 +611,22 @@ export class UsersComponent {
     const withUsers = new Set(this.clientUsers().map(u => u.companyId));
     return this.companies().filter(c => c.status === 'active' && withUsers.has(c.id)).length;
   });
-  neverLogged = computed(() => [...this.clientUsers(), ...this.technicians()].filter(u => !u.lastLoginAt));
+  neverLogged = computed(() => [...this.clientUsers(), ...this.technicians(), ...this.collaborators()].filter(u => !u.lastLoginAt));
 
   fixedGroups = computed(() => [
-    { id: 'all', label: 'Todas las personas', icon: 'users' as const, count: this.clientUsers().length + this.technicians().length },
+    { id: 'all', label: 'Todas las personas', icon: 'users' as const, count: this.clientUsers().length + this.technicians().length + this.collaborators().length },
     { id: 'team', label: 'Equipo 3TECH', icon: 'settings' as const, count: this.technicians().length },
+    { id: 'internal', label: 'Colaboradores internos', icon: 'share' as const, count: this.collaborators().length },
   ]);
+
+  departmentGroups = computed(() => this.departments()
+    .map(d => ({ ...d, count: this.userService.users().filter(u => u.departmentId === d.id).length }))
+    .sort((a, b) => Number(!a.active) - Number(!b.active) || a.name.localeCompare(b.name)));
+
+  selectedDepartment = computed(() => {
+    const g = this.group();
+    return g.startsWith('dep:') ? this.departments().find(d => d.id === g.slice(4)) ?? null : null;
+  });
 
   /** Empresas para la columna izquierda: activas primero, luego por nombre. */
   companyGroups = computed(() => this.companies()
@@ -532,8 +640,11 @@ export class UsersComponent {
   people = computed(() => {
     const g = this.group();
     const tickets = this.ticketService.getAll();
-    const base = g === 'all' ? [...this.technicians(), ...this.clientUsers()]
+    const internal = this.internalRequests.items();
+    const base = g === 'all' ? [...this.technicians(), ...this.collaborators(), ...this.clientUsers()]
       : g === 'team' ? this.technicians()
+      : g === 'internal' ? this.collaborators()
+      : g.startsWith('dep:') ? this.userService.users().filter(u => u.departmentId === g.slice(4))
       : this.clientUsers().filter(u => u.companyId === g);
     const s = this.search().trim().toLowerCase();
     const now = Date.now();
@@ -541,11 +652,14 @@ export class UsersComponent {
       .filter(u => !this.onlyNever() || !u.lastLoginAt)
       .map(u => {
         const companyName = this.companyService.getById(u.companyId ?? '')?.name ?? '';
+        const departmentName = this.departmentService.getById(u.departmentId)?.name ?? '';
+        const internalOpen = internal.filter(r => r.assignedTo?.id === u.id && r.status !== 'resolved' && r.status !== 'closed').length;
+        const internalCreated = internal.filter(r => r.createdById === u.id).length;
         const mine = tickets.filter(t => t.assignedTo?.id === u.id);
         const open = mine.filter(t => !isClosed(t));
         const last = u.lastLoginAt ? new Date(u.lastLoginAt).getTime() : null;
         return {
-          ...u, user: u, companyName,
+          ...u, user: u, companyName, departmentName, internalOpen, internalCreated,
           ticketsCreated: tickets.filter(t => t.createdById === u.id).length,
           open: open.length, resolved: mine.filter(isClosed).length,
           breached: open.filter(t => this.ticketService.isSlaBreached(t)).length,
@@ -553,8 +667,8 @@ export class UsersComponent {
           recent: !!last && now - last < 24 * 36e5,
         };
       })
-      .filter(u => !s || [u.name, u.username, u.email, u.companyName].some(v => v.toLowerCase().includes(s)))
-      .sort((a, b) => Number(b.role === 'technician') - Number(a.role === 'technician') || a.companyName.localeCompare(b.companyName) || a.name.localeCompare(b.name));
+      .filter(u => !s || [u.name, u.username, u.email, u.companyName, u.departmentName].some(v => v.toLowerCase().includes(s)))
+      .sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.companyName.localeCompare(b.companyName) || a.departmentName.localeCompare(b.departmentName) || a.name.localeCompare(b.name));
   });
 
   selectGroup(id: string) {
@@ -569,6 +683,8 @@ export class UsersComponent {
   addPerson() {
     const g = this.group();
     if (g === 'team') this.openModal('technician');
+    else if (g === 'internal') this.openModal('collaborator');
+    else if (g.startsWith('dep:')) this.openModal('collaborator', '', g.slice(4));
     else this.openModal('client', g === 'all' ? '' : g);
   }
 
@@ -590,11 +706,17 @@ export class UsersComponent {
     return isControlInvalid(this.form.get(name));
   }
 
-  /** Un técnico no pertenece a ninguna empresa: el campo se deshabilita para que no cuente en la validación. */
-  setRole(role: 'client' | 'technician') {
+  /**
+   * Un técnico o colaborador no pertenece a ninguna empresa (el campo se deshabilita
+   * para que no cuente en la validación); el departamento solo es obligatorio para colaboradores.
+   */
+  setRole(role: Role) {
     this.form.patchValue({ role });
     const company = this.form.get('companyId');
-    if (role === 'technician') company?.disable(); else company?.enable();
+    if (role === 'client') company?.enable(); else company?.disable();
+    const dep = this.form.get('departmentId')!;
+    dep.setValidators(role === 'collaborator' ? Validators.required : null);
+    dep.updateValueAndValidity();
   }
 
   onNameInput() {
@@ -609,11 +731,11 @@ export class UsersComponent {
     this.showPassword.set(true);
   }
 
-  openModal(role: 'client' | 'technician', companyId = '') {
+  openModal(role: Role, companyId = '', departmentId = '') {
     this.editingId.set(null);
     this.usernameTouched = false;
     this.showPassword.set(false);
-    this.form.reset({ role, name: '', username: '', email: '', companyId, password: '' });
+    this.form.reset({ role, name: '', username: '', email: '', companyId, departmentId, password: '' });
     this.setRole(role);
     this.form.get('password')?.enable();
     this.showModal.set(true);
@@ -623,8 +745,9 @@ export class UsersComponent {
   editUser(u: User) {
     this.editingId.set(u.id);
     this.usernameTouched = true;
-    this.form.reset({ role: u.role === 'technician' ? 'technician' : 'client', name: u.name, username: u.username, email: u.email, companyId: u.companyId || '', password: '' });
-    this.setRole(u.role === 'technician' ? 'technician' : 'client');
+    const role: Role = u.role === 'technician' || u.role === 'collaborator' ? u.role : 'client';
+    this.form.reset({ role, name: u.name, username: u.username, email: u.email, companyId: u.companyId || '', departmentId: u.departmentId || '', password: '' });
+    this.setRole(role);
     this.form.get('password')?.disable();
     this.showModal.set(true);
   }
@@ -632,23 +755,83 @@ export class UsersComponent {
   async saveUser() {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     const v = this.form.getRawValue();
-    const isTech = v.role === 'technician';
-    const data = { name: v.name!.trim(), username: v.username!.trim(), email: v.email!.trim(), companyId: isTech ? null : v.companyId! };
+    const isClient = v.role === 'client';
+    const data = { name: v.name!.trim(), username: v.username!.trim(), email: v.email!.trim(), companyId: isClient ? v.companyId! : null };
+    const departmentId = isClient ? null : (v.departmentId || null);
     this.saving.set(true);
     try {
       if (this.editingId()) {
         const { companyId, ...common } = data;
-        await this.userService.update(this.editingId()!, isTech ? common : { ...common, companyId });
+        await this.userService.update(this.editingId()!, isClient ? { ...common, companyId } : { ...common, departmentId });
         this.notify.success('Usuario actualizado.');
       } else {
-        await this.userService.create({ ...data, role: v.role!, password: v.password! });
-        this.credentials.set({ title: isTech ? 'Técnico creado' : 'Acceso creado', name: data.name, username: data.username, password: v.password! });
+        await this.userService.create({ ...data, departmentId, role: v.role!, password: v.password! });
+        const title = v.role === 'technician' ? 'Técnico creado' : v.role === 'collaborator' ? 'Colaborador creado' : 'Acceso creado';
+        this.credentials.set({ title, name: data.name, username: data.username, password: v.password! });
       }
+      // Los conteos de miembros por departamento cambian.
+      if (!isClient) this.departmentService.load().catch(() => undefined);
       this.closeModal();
     } catch (err) {
       this.notify.error(apiErrorMessage(err));
     } finally {
       this.saving.set(false);
+    }
+  }
+
+  // ── Departamentos ──
+  openDepartmentModal(d?: Department) {
+    this.editingDepartment.set(d ?? null);
+    this.departmentForm.reset({ name: d?.name ?? '', slaHours: d?.slaHours ?? 8 });
+    this.departmentModal.set(true);
+  }
+
+  async saveDepartment() {
+    if (this.departmentForm.invalid) { this.departmentForm.markAllAsTouched(); return; }
+    const v = this.departmentForm.getRawValue();
+    const data = { name: v.name!.trim(), slaHours: Number(v.slaHours) };
+    this.saving.set(true);
+    try {
+      const editing = this.editingDepartment();
+      if (editing) {
+        await this.departmentService.update(editing.id, data);
+        this.notify.success('Departamento actualizado. El nuevo tiempo aplica a las solicitudes nuevas.');
+      } else {
+        const d = await this.departmentService.create(data);
+        this.selectGroup('dep:' + d.id);
+        this.notify.success(`Departamento "${d.name}" creado. Agrégale personas para que reciba solicitudes.`);
+      }
+      this.departmentModal.set(false);
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  async toggleDepartment(d: Department) {
+    try {
+      await this.departmentService.update(d.id, { active: !d.active });
+      this.notify.success(d.active ? `"${d.name}" ya no recibe solicitudes nuevas. Su historial se conserva.` : `"${d.name}" vuelve a recibir solicitudes.`);
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
+    }
+  }
+
+  async deleteDepartment(d: Department) {
+    const ok = await this.confirm.ask({
+      title: 'Eliminar departamento',
+      message: `¿Eliminar "${d.name}"? Solo es posible si nunca tuvo solicitudes; si tiene historial, desactívalo.`,
+      confirmLabel: 'Eliminar', danger: true,
+    });
+    if (!ok) return;
+    try {
+      await this.departmentService.delete(d.id);
+      this.selectGroup('all');
+      this.userService.load().catch(() => undefined);
+      this.notify.success('Departamento eliminado.');
+    } catch (err) {
+      this.notify.error(apiErrorMessage(err));
     }
   }
 

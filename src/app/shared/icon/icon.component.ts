@@ -9,7 +9,7 @@ export type IconName =
   | 'dollar-sign' | 'message-circle' | 'clipboard' | 'paperclip' | 'tag'
   | 'file-text' | 'image' | 'archive' | 'download' | 'upload' | 'loader'
   | 'send' | 'bell' | 'star' | 'external-link' | 'copy' | 'globe' | 'trending-up' | 'play'
-  | 'lightbulb' | 'help-circle';
+  | 'lightbulb' | 'help-circle' | 'refresh' | 'share';
 
 @Component({
   selector: 'app-icon',
@@ -209,6 +209,13 @@ export type IconName =
         @case ('play') {
           <circle cx="12" cy="12" r="10" />
           <path d="m10 8 6 4-6 4V8Z" />
+        }
+        @case ('refresh') {
+          <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+          <path d="M3 3v5h5" />
+        }
+        @case ('share') {
+          <path d="M17 3h4v4" /><path d="M21 3l-7 7" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
         }
         @case ('lightbulb') {
           <path d="M9 18h6M10 22h4" />

@@ -1,5 +1,5 @@
 import {
-  ActivityLogEntry, AppNotification, Company, CompanyPlan, Project, ProjectComment,
+  ActivityLogEntry, AppNotification, Company, CompanyPlan, Department, InternalAttachment, InternalRequest, InternalResponse, Project, ProjectComment,
   ProjectDocument, ProjectLink, ProjectRequirement, ProjectStage, ProjectTask, ProjectUpdate, Ticket, TicketAttachment, TicketResponse, User,
 } from '../models';
 import { fileUrl } from '../config/api.config';
@@ -29,7 +29,7 @@ export const planToApi = (plan: CompanyPlan) => plan.toUpperCase();
 export function toUser(u: Api): User {
   return {
     id: u.id, username: u.username, role: lower(u.role), companyId: opt(u.companyId), name: u.name, email: u.email,
-    lastLoginAt: opt(u.lastLoginAt),
+    departmentId: opt(u.departmentId), lastLoginAt: opt(u.lastLoginAt),
   };
 }
 
@@ -174,4 +174,40 @@ export function upsert<T extends { id: string }>(list: T[], item: T): T[] {
   const copy = list.slice();
   copy[i] = item;
   return copy;
+}
+
+// ───────────── Solicitudes internas ─────────────
+
+export function toDepartment(d: Api): Department {
+  return {
+    id: d.id, name: d.name, slaHours: d.slaHours, active: d.active, openReceived: d.openReceived ?? 0,
+    members: (d.members ?? []).map((m: Api) => ({ id: m.id, name: m.name, role: lower(m.role) })),
+  };
+}
+
+const toInternalAttachment = (a: Api): InternalAttachment => ({
+  id: a.id, name: a.name, type: extension(a.name), size: a.size, url: fileUrl(a.filePath)!,
+});
+
+const toInternalResponse = (r: Api): InternalResponse => ({
+  id: r.id, authorId: r.authorId, authorName: r.authorName, authorRole: lower(r.authorRole),
+  authorDepartmentId: opt(r.authorDepartmentId), content: r.content, createdAt: r.createdAt,
+  attachments: (r.attachments ?? []).map(toInternalAttachment),
+});
+
+export function toInternalRequest(r: Api): InternalRequest {
+  return {
+    id: r.id, number: r.number, title: r.title, description: r.description,
+    category: lower(r.category), status: lower(r.status), priority: lower(r.priority),
+    fromDepartment: r.fromDepartment, toDepartment: r.toDepartment,
+    createdById: opt(r.createdById), createdByName: r.createdByName,
+    assignedTo: r.assignedTo ? { id: r.assignedTo.id, name: r.assignedTo.name, role: lower(r.assignedTo.role) } : undefined,
+    slaDeadline: r.slaDeadline, firstResponseAt: opt(r.firstResponseAt), resolvedAt: opt(r.resolvedAt), resolvedByName: opt(r.resolvedByName),
+    slaBreached: !!r.slaBreached, slaMet: r.slaMet ?? null,
+    createdAt: r.createdAt, updatedAt: r.updatedAt,
+    responseCount: r._count?.responses ?? r.responses?.length ?? 0,
+    lastResponse: r.lastResponse ? { ...r.lastResponse, authorDepartmentId: opt(r.lastResponse.authorDepartmentId) } : undefined,
+    responses: r.responses ? r.responses.map(toInternalResponse) : undefined,
+    attachments: r.attachments ? r.attachments.map(toInternalAttachment) : undefined,
+  };
 }

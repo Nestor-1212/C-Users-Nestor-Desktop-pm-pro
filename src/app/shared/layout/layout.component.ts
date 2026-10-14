@@ -13,6 +13,8 @@ import { apiErrorMessage, loadPageData } from '../../core/http/api-error';
 import { NotificationService } from '../services/notification.service';
 import { IconComponent } from '../icon/icon.component';
 import { TourService } from '../services/tour.service';
+import { InternalRequestService } from '../../core/services/internal-request.service';
+import { DepartmentService } from '../../core/services/department.service';
 
 @Component({
   selector: 'app-layout',
@@ -39,11 +41,12 @@ import { TourService } from '../services/tour.service';
           <div class="user-avatar">{{ userInitials() }}</div>
           <div class="user-info">
             <span class="user-name">{{ auth.currentUser()?.name }}</span>
-            <span class="user-role">{{ auth.isOwner() ? 'Administrador' : auth.isTechnician() ? 'Técnico 3TECH' : 'Empresa Cliente' }}</span>
+            <span class="user-role">{{ roleLabel() }}</span>
           </div>
         </div>
 
         <nav class="sidebar-nav" aria-label="Navegación principal">
+          @if (!auth.isCollaborator()) {
           @if (!auth.isTechnician()) {
             <a routerLink="/dashboard" routerLinkActive="active" class="nav-item" aria-label="Dashboard" (click)="mobileOpen.set(false)">
               <span class="nav-icon-wrap"><app-icon name="chart" [size]="18" class="nav-icon" /></span>
@@ -87,6 +90,18 @@ import { TourService } from '../services/tour.service';
             <a routerLink="/aprende" routerLinkActive="active" class="nav-item" aria-label="Aprende a pedir soporte" (click)="mobileOpen.set(false)">
               <span class="nav-icon-wrap"><app-icon name="lightbulb" [size]="18" class="nav-icon" /></span>
               <span class="nav-label">Aprende</span>
+            </a>
+          }
+          }
+          @if (auth.canUseInternal()) {
+            <a routerLink="/internas" routerLinkActive="active" class="nav-item"
+              [attr.aria-label]="'Solicitudes internas' + (internalPending() > 0 ? ', ' + internalPending() + ' por atender' : '')"
+              (click)="mobileOpen.set(false)">
+              <span class="nav-icon-wrap">
+                <app-icon name="share" [size]="18" class="nav-icon" />
+                @if (internalPending() > 0) { <span class="nav-icon-badge" aria-hidden="true">{{ internalPending() }}</span> }
+              </span>
+              <span class="nav-label">Solicitudes internas</span>
             </a>
           }
         </nav>
@@ -400,6 +415,8 @@ export class LayoutComponent {
   private ticketService = inject(TicketService);
   private notificationCenter = inject(NotificationCenterService);
   private companyService = inject(CompanyService);
+  private internalRequests = inject(InternalRequestService);
+  private departments = inject(DepartmentService);
   private notify = inject(NotificationService);
   private fb = inject(FormBuilder);
   private router = inject(Router);
@@ -429,12 +446,29 @@ export class LayoutComponent {
       .subscribe(() => this.updatePageTitle());
 
     // Datos comunes a toda la app: campana, contador de tickets abiertos y, para clientes, su empresa (logo, tiempo de respuesta).
-    loadPageData(this.notify, this.notificationCenter.load(), this.ticketService.load(), this.companyService.load());
+    // Un colaborador interno no usa nada de clientes: solo la campana y sus solicitudes internas.
+    const internal = this.auth.canUseInternal() ? [this.internalRequests.load(), this.departments.load()] : [];
+    if (this.auth.isCollaborator()) loadPageData(this.notify, this.notificationCenter.load(), ...internal);
+    else loadPageData(this.notify, this.notificationCenter.load(), this.ticketService.load(), this.companyService.load(), ...internal);
     // Refresco periódico silencioso: refleja acciones de otros usuarios sin recargar la página.
     interval(LayoutComponent.NOTIFICATIONS_REFRESH_MS)
       .pipe(takeUntilDestroyed())
-      .subscribe(() => this.notificationCenter.load().catch(() => undefined));
+      .subscribe(() => {
+        this.notificationCenter.load().catch(() => undefined);
+        if (this.auth.canUseInternal()) this.internalRequests.load().catch(() => undefined);
+      });
   }
+
+  /** Solicitudes que esperan respuesta del departamento del usuario. */
+  internalPending = computed(() => this.internalRequests.pendingForMe());
+
+  roleLabel = computed(() => {
+    if (this.auth.isOwner()) return 'Administrador';
+    if (this.auth.isClient()) return 'Empresa Cliente';
+    const dep = this.departments.getById(this.auth.currentUser()?.departmentId)?.name;
+    if (this.auth.isTechnician()) return dep && dep !== 'Tecnología' ? `Técnico · ${dep}` : 'Técnico 3TECH';
+    return dep ? `Colaborador · ${dep}` : 'Colaborador';
+  });
 
   private updatePageTitle() {
     let r = this.route.firstChild;
